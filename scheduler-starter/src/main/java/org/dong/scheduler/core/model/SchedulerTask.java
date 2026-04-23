@@ -30,7 +30,7 @@ public class SchedulerTask {
     private int version;
     private String errorCode;
     private String errorMsg;
-    private String extJson;
+    private String extInfo;
     private LocalDateTime createTime;
     private LocalDateTime updateTime;
 

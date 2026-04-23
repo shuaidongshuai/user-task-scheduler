@@ -4,11 +4,11 @@ DROP TABLE IF EXISTS scheduler_task;
 
 CREATE TABLE IF NOT EXISTS scheduler_task (
     id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键ID',
-    task_no VARCHAR(64) NOT NULL UNIQUE COMMENT '任务唯一号（幂等键）',
+    task_no VARCHAR(64) NOT NULL UNIQUE COMMENT '任务唯一号（调度内部唯一键）',
     group_code VARCHAR(64) NOT NULL COMMENT '任务组编码',
     user_id VARCHAR(64) NOT NULL COMMENT '用户ID',
     biz_type VARCHAR(64) NOT NULL COMMENT '业务类型（匹配TaskHandler）',
-    biz_key VARCHAR(128) DEFAULT NULL COMMENT '业务键（用于业务侧幂等）',
+    biz_key VARCHAR(128) NOT NULL COMMENT '业务键（和biz_type组成业务幂等键）',
 
     status VARCHAR(32) NOT NULL COMMENT '任务状态：PENDING/RUNNABLE/RUNNING/WAIT_RETRY/SUCCESS/FAILED/CANCELLED',
     priority INT NOT NULL DEFAULT 0 COMMENT '优先级，值越大优先级越高',
@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS scheduler_task (
     error_code VARCHAR(64) DEFAULT NULL COMMENT '错误码',
     error_msg VARCHAR(1024) DEFAULT NULL COMMENT '错误信息',
 
-    ext_json JSON DEFAULT NULL COMMENT '扩展字段（JSON）',
+    ext_info TEXT DEFAULT NULL COMMENT '扩展信息（字符串）',
 
     create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
@@ -42,7 +42,8 @@ CREATE TABLE IF NOT EXISTS scheduler_task (
     INDEX idx_group_status_time (group_code, status, execute_at),
     INDEX idx_status_time (status, execute_at),
     INDEX idx_user_group_status (user_id, group_code, status),
-    INDEX idx_heartbeat (status, heartbeat_time)
+    INDEX idx_heartbeat (status, heartbeat_time),
+    UNIQUE KEY uk_biz_type_biz_key (biz_type, biz_key)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='调度任务主表';
 
 CREATE TABLE IF NOT EXISTS scheduler_group_config (

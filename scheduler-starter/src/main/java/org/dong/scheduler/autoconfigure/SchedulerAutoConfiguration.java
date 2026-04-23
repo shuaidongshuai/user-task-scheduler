@@ -144,9 +144,8 @@ public class SchedulerAutoConfiguration {
     @Bean
     @ConditionalOnMissingBean
     public SchedulerClient schedulerClient(TaskRepository taskRepository,
-                                           QueueRedisService queueRedisService,
-                                           ObjectMapper objectMapper) {
-        return new DefaultSchedulerClient(taskRepository, queueRedisService, objectMapper);
+                                           QueueRedisService queueRedisService) {
+        return new DefaultSchedulerClient(taskRepository, queueRedisService);
     }
 
     private static String defaultInstanceId() {

@@ -125,7 +125,7 @@ public class WorkerService {
                             task.getId(), task.getTaskNo(), executeNo);
                     return;
                 }
-                if (state != BusinessTaskState.NEED_RUNNING) {
+                if (state != BusinessTaskState.NEED_RUNNING && state != BusinessTaskState.RUNNING) {
                     LocalDateTime nextCheckAt = nextRetryTime(task);
                     boolean deferred = taskRepository.rescheduleToRunnable(
                             task.getId(),
@@ -151,6 +151,7 @@ public class WorkerService {
             }
 
             TaskExecuteResult result = executeWithTimeout(task, handler);
+            persistExtInfoIfPresent(task, result.getExtInfo());
             if (result.isSuccess()) {
                 taskRepository.markSuccess(task.getId(), LocalDateTime.now());
                 finalStatus = TaskStatus.SUCCESS;
@@ -204,7 +205,12 @@ public class WorkerService {
             }
         } finally {
             heartbeat.cancel(true);
-            concurrencyGuard.release(task.getGroupCode(), task.getUserId(), task.getId(), executeNo);
+            boolean released = concurrencyGuard.release(task.getGroupCode(), task.getUserId(), task.getId(), executeNo);
+            if (!released) {
+                concurrencyGuard.repairRelease(task.getGroupCode(), task.getUserId());
+                log.warn("worker release mismatch, repaired running counters, taskId={}, taskNo={}, executeNo={}, group={}, user={}",
+                        task.getId(), task.getTaskNo(), executeNo, task.getGroupCode(), task.getUserId());
+            }
             taskRepository.finishExecution(executeNo, finalStatus, errorCode, errorMsg, LocalDateTime.now());
             long cost = System.currentTimeMillis() - begin;
             log.info("worker run end, taskId={}, taskNo={}, executeNo={}, finalStatus={}, errorCode={}, costMs={}",
@@ -259,6 +265,14 @@ public class WorkerService {
 
     private LocalDateTime nextRetryTime(SchedulerTask task) {
         return LocalDateTime.now().plusSeconds(task.retryDelaySec(properties.getDefaultRetryDelaySec()));
+    }
+
+    private void persistExtInfoIfPresent(SchedulerTask task, String extInfo) {
+        if (extInfo == null) {
+            return;
+        }
+        taskRepository.updateExtInfo(task.getId(), extInfo, LocalDateTime.now());
+        task.setExtInfo(extInfo);
     }
 
     @PreDestroy

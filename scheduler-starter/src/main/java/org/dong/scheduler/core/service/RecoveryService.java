@@ -11,6 +11,8 @@ import org.slf4j.LoggerFactory;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 
 public class RecoveryService {
     private static final Logger log = LoggerFactory.getLogger(RecoveryService.class);
@@ -42,6 +44,9 @@ public class RecoveryService {
         }
         for (SchedulerTask task : timeoutTasks) {
             try {
+                log.info("recovery timeout task hit, taskId={}, taskNo={}, group={}, user={}, bizType={}, bizKey={}, status={}, executeAt={}, retryCount={}/{}",
+                        task.getId(), task.getTaskNo(), task.getGroupCode(), task.getUserId(), task.getBizType(),
+                        task.getBizKey(), task.getStatus(), task.getExecuteAt(), task.getRetryCount(), task.getMaxRetryCount());
                 String lease = concurrencyGuard.leaseValue(task.getId());
                 if (lease != null && !lease.isBlank()) {
                     log.debug("recovery skip task because lease still exists, taskId={}, taskNo={}, lease={}",
@@ -56,16 +61,18 @@ public class RecoveryService {
                     if (ok) {
                         concurrencyGuard.repairRelease(task.getGroupCode(), task.getUserId());
                         taskRepository.findById(task.getId()).ifPresent(queueRedisService::enqueue);
-                        log.warn("recovery moved task to WAIT_RETRY, taskId={}, taskNo={}, nextRetryAt={}",
-                                task.getId(), task.getTaskNo(), nextRetryAt);
+                        log.warn("recovery moved task to WAIT_RETRY, taskId={}, taskNo={}, group={}, user={}, bizType={}, bizKey={}, nextRetryAt={}, retryCount={}/{}",
+                                task.getId(), task.getTaskNo(), task.getGroupCode(), task.getUserId(), task.getBizType(),
+                                task.getBizKey(), nextRetryAt, task.getRetryCount() + 1, task.getMaxRetryCount());
                         recovered++;
                     }
                 } else {
                     boolean ok = taskRepository.markFailed(task.getId(), "HEARTBEAT_TIMEOUT", "heartbeat timeout recovered", LocalDateTime.now());
                     if (ok) {
                         concurrencyGuard.repairRelease(task.getGroupCode(), task.getUserId());
-                        log.error("recovery marked task FAILED after timeout, taskId={}, taskNo={}",
-                                task.getId(), task.getTaskNo());
+                        log.error("recovery marked task FAILED after timeout, taskId={}, taskNo={}, group={}, user={}, bizType={}, bizKey={}, retryCount={}/{}",
+                                task.getId(), task.getTaskNo(), task.getGroupCode(), task.getUserId(), task.getBizType(),
+                                task.getBizKey(), task.getRetryCount(), task.getMaxRetryCount());
                         recovered++;
                     }
                 }
@@ -87,6 +94,9 @@ public class RecoveryService {
                 if (!queueRedisService.existsInTime(task.getGroupCode(), task.getId())) {
                     queueRedisService.enqueue(task);
                     refillTime++;
+                    log.info("queue refill task enqueued to time queue, taskId={}, taskNo={}, group={}, user={}, bizType={}, bizKey={}, executeAt={}, status={}",
+                            task.getId(), task.getTaskNo(), task.getGroupCode(), task.getUserId(), task.getBizType(),
+                            task.getBizKey(), task.getExecuteAt(), task.getStatus());
                 }
                 continue;
             }
@@ -94,6 +104,9 @@ public class RecoveryService {
             if (!queueRedisService.existsInReady(task.getGroupCode(), task.getId())) {
                 queueRedisService.addToReady(task);
                 refillReady++;
+                log.info("queue refill task added to ready queue, taskId={}, taskNo={}, group={}, user={}, bizType={}, bizKey={}, executeAt={}, priority={}, status={}",
+                        task.getId(), task.getTaskNo(), task.getGroupCode(), task.getUserId(), task.getBizType(),
+                        task.getBizKey(), task.getExecuteAt(), task.getPriority(), task.getStatus());
             }
             queueRedisService.removeFromTime(task.getGroupCode(), task.getId());
         }
@@ -103,5 +116,98 @@ public class RecoveryService {
             log.debug("queue refill no-op, scanned={}", list.size());
         }
         return refillTime + refillReady;
+    }
+
+    public int reconcileRunningCountersIfNeeded(List<String> groupCodes) {
+        String owner = properties.getInstanceId() + ":" + UUID.randomUUID();
+        boolean locked = concurrencyGuard.tryAcquireReconcileLock(owner, properties.getReconcileLockSec());
+        if (!locked) {
+            log.debug("skip running counter reconcile, lock held by another instance");
+            return 0;
+        }
+        int reconciledGroups = 0;
+        try {
+            for (String groupCode : groupCodes) {
+                if (reconcileRunningCountersForGroup(groupCode)) {
+                    reconciledGroups++;
+                }
+            }
+            return reconciledGroups;
+        } finally {
+            concurrencyGuard.releaseReconcileLock(owner);
+        }
+    }
+
+    private boolean reconcileRunningCountersForGroup(String groupCode) {
+        long dbGroupRunning = taskRepository.countRunningByGroup(groupCode);
+        long redisGroupRunning = concurrencyGuard.groupRunning(groupCode);
+        if (redisGroupRunning <= dbGroupRunning) {
+            if (redisGroupRunning < dbGroupRunning) {
+                log.warn("running counter drift detected but skipped (redis<db), group={}, redisGroupRunning={}, dbGroupRunning={}",
+                        groupCode, redisGroupRunning, dbGroupRunning);
+            }
+            return false;
+        }
+
+        // Global reconcile baseline: only fix overflow (redis > db).
+        Map<String, Long> dbUserRunning = taskRepository.countRunningByUserInGroup(groupCode);
+        long remaining = redisGroupRunning - dbGroupRunning;
+        long originalRemaining = remaining;
+
+        // First pass: compare only DB users to avoid scanning all Redis user counters every time.
+        for (Map.Entry<String, Long> entry : dbUserRunning.entrySet()) {
+            if (remaining <= 0) {
+                break;
+            }
+            String userId = entry.getKey();
+            long dbUser = entry.getValue() == null ? 0L : entry.getValue();
+            long redisUser = concurrencyGuard.userRunning(groupCode, userId);
+            if (redisUser <= dbUser) {
+                continue;
+            }
+            long expectedReduce = Math.min(redisUser - dbUser, remaining);
+            long actualReduce = concurrencyGuard.reduceUserAndGroupRunning(groupCode, userId, expectedReduce);
+            if (actualReduce <= 0) {
+                continue;
+            }
+            remaining -= actualReduce;
+            long redisAfter = concurrencyGuard.userRunning(groupCode, userId);
+            log.warn("running counter reconciled by user (db user pass), group={}, user={}, redisBefore={}, dbTarget={}, expectedReduce={}, actualReduce={}, redisAfter={}, remainingOverflow={}",
+                    groupCode, userId, redisUser, dbUser, expectedReduce, actualReduce, redisAfter, remaining);
+        }
+
+        // Fallback: only when overflow remains, scan Redis users and trim extra stale counters.
+        if (remaining > 0) {
+            Map<String, Long> redisUserRunning = concurrencyGuard.listUserRunning(groupCode);
+            for (Map.Entry<String, Long> entry : redisUserRunning.entrySet()) {
+                if (remaining <= 0) {
+                    break;
+                }
+                String userId = entry.getKey();
+                long redisUser = entry.getValue() == null ? 0L : entry.getValue();
+                long dbUser = dbUserRunning.getOrDefault(userId, 0L);
+                if (redisUser <= dbUser) {
+                    continue;
+                }
+                long expectedReduce = Math.min(redisUser - dbUser, remaining);
+                long actualReduce = concurrencyGuard.reduceUserAndGroupRunning(groupCode, userId, expectedReduce);
+                if (actualReduce <= 0) {
+                    continue;
+                }
+                remaining -= actualReduce;
+                long redisAfter = concurrencyGuard.userRunning(groupCode, userId);
+                log.warn("running counter reconciled by user (redis fallback pass), group={}, user={}, redisBefore={}, dbTarget={}, expectedReduce={}, actualReduce={}, redisAfter={}, remainingOverflow={}",
+                        groupCode, userId, redisUser, dbUser, expectedReduce, actualReduce, redisAfter, remaining);
+            }
+        }
+
+        // Final hard correction for any orphan overflow not covered by user counters.
+        if (remaining > 0) {
+            concurrencyGuard.setGroupRunning(groupCode, dbGroupRunning);
+        }
+        long redisGroupAfter = concurrencyGuard.groupRunning(groupCode);
+        log.warn("running counters reconciled (redis>db), group={}, redisGroupBefore={}, dbGroup={}, redisGroupAfter={}, overflowBefore={}, remainingOverflow={}",
+                groupCode, redisGroupRunning, dbGroupRunning, redisGroupAfter, originalRemaining, remaining);
+        return true;
     }
 }

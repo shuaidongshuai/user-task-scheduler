@@ -1,7 +1,5 @@
 package org.dong.scheduler.core.service;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.dong.scheduler.core.enums.TaskStatus;
 import org.dong.scheduler.core.model.SchedulerTask;
 import org.dong.scheduler.core.model.TaskSubmitRequest;
@@ -12,7 +10,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.time.LocalDateTime;
-import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -23,29 +20,38 @@ public class DefaultSchedulerClient implements SchedulerClient {
 
     private final TaskRepository taskRepository;
     private final QueueRedisService queueRedisService;
-    private final ObjectMapper objectMapper;
 
     public DefaultSchedulerClient(TaskRepository taskRepository,
-                                  QueueRedisService queueRedisService,
-                                  ObjectMapper objectMapper) {
+                                  QueueRedisService queueRedisService) {
         this.taskRepository = taskRepository;
         this.queueRedisService = queueRedisService;
-        this.objectMapper = objectMapper;
     }
 
     @Override
     public long submit(TaskSubmitRequest request) {
         TaskSubmitRequest normalized = normalize(request);
+        SchedulerTask existing = taskRepository.findByBizTypeAndBizKey(normalized.getBizType(), normalized.getBizKey())
+                .orElse(null);
+        if (existing != null) {
+            log.info("submit task request deduplicated, taskId={}, taskNo={}, group={}, user={}, bizType={}, bizKey={}",
+                    existing.getId(), existing.getTaskNo(), existing.getGroupCode(), existing.getUserId(),
+                    existing.getBizType(), existing.getBizKey());
+            return existing.getId();
+        }
+        String taskNo = "task-" + UUID.randomUUID().toString().replace("-", "");
         LocalDateTime now = LocalDateTime.now();
         TaskStatus status = normalized.getExecuteAt().isAfter(now) ? TaskStatus.PENDING : TaskStatus.RUNNABLE;
         log.info("submit task request accepted, taskNo={}, group={}, user={}, bizType={}, priority={}, executeAt={}, maxRetry={}",
-                normalized.getTaskNo(), normalized.getGroupCode(), normalized.getUserId(), normalized.getBizType(),
+                taskNo, normalized.getGroupCode(), normalized.getUserId(), normalized.getBizType(),
                 normalized.getPriority(), normalized.getExecuteAt(), normalized.getMaxRetryCount());
-        long id = taskRepository.insert(normalized, toJson(normalized.getExt()), status);
+        long id = taskRepository.insert(taskNo, normalized, normalized.getExtInfo(), status);
 
         SchedulerTask task = taskRepository.findById(id)
                 .orElseThrow(() -> new IllegalStateException("task not found after insert: " + id));
-        queueRedisService.enqueue(task);
+        // DuplicateKey race fallback may return an existing task id; existing tasks should not be re-enqueued.
+        if (taskNo.equals(task.getTaskNo())) {
+            queueRedisService.enqueue(task);
+        }
         log.info("task submitted, taskId={}, taskNo={}, status={}, executeAt={}",
                 id, task.getTaskNo(), status, task.getExecuteAt());
         return id;
@@ -63,10 +69,7 @@ public class DefaultSchedulerClient implements SchedulerClient {
         requireText(request.getGroupCode(), "groupCode is required");
         requireText(request.getUserId(), "userId is required");
         requireText(request.getBizType(), "bizType is required");
-
-        if (request.getTaskNo() == null || request.getTaskNo().isBlank()) {
-            request.setTaskNo("task-" + UUID.randomUUID().toString().replace("-", ""));
-        }
+        requireText(request.getBizKey(), "bizKey is required");
         if (request.getExecuteAt() == null) {
             request.setExecuteAt(LocalDateTime.now());
         }
@@ -86,26 +89,12 @@ public class DefaultSchedulerClient implements SchedulerClient {
         } else if (request.getPriority() > MAX_PRIORITY) {
             request.setPriority(MAX_PRIORITY);
         }
-        if (request.getExt() == null) {
-            request.setExt(Map.of());
-        }
         return request;
     }
 
     private void requireText(String value, String message) {
         if (value == null || value.isBlank()) {
             throw new IllegalArgumentException(message);
-        }
-    }
-
-    private String toJson(Object obj) {
-        if (obj == null) {
-            return null;
-        }
-        try {
-            return objectMapper.writeValueAsString(obj);
-        } catch (JsonProcessingException e) {
-            throw new IllegalArgumentException("cannot serialize ext", e);
         }
     }
 }

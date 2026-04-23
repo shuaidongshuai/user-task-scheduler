@@ -38,9 +38,20 @@ mvn -DskipTests -pl scheduler-starter -am install
 
 ```bash
 export JAVA_HOME=/Users/chenmingdong01/Library/Java/JavaVirtualMachines/openjdk-21.0.1/Contents/Home
-export DEMO_DB_URL='jdbc:mysql://127.0.0.1:3306/scheduler_demo?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false'
+export DEMO_DB_URL='jdbc:mysql://127.0.0.1:3306/scheduler_demo?useUnicode=true&characterEncoding=utf8&serverTimezone=SYSTEM&allowPublicKeyRetrieval=true&useSSL=false'
 export DEMO_DB_USERNAME='root'
 export DEMO_DB_PASSWORD='root'
+# Production baseline Hikari tuning (override by your DB capacity):
+export DEMO_DB_POOL_NAME='scheduler-hikari'
+export DEMO_DB_MIN_IDLE='12'
+export DEMO_DB_MAX_POOL_SIZE='40'
+export DEMO_DB_MAX_LIFETIME_MS='1700000'
+export DEMO_DB_IDLE_TIMEOUT_MS='300000'
+export DEMO_DB_KEEPALIVE_MS='300000'
+export DEMO_DB_VALIDATION_TIMEOUT_MS='5000'
+export DEMO_DB_CONNECTION_TIMEOUT_MS='10000'
+export DEMO_DB_INIT_FAIL_TIMEOUT_MS='1'
+export DEMO_DB_LEAK_DETECT_MS='0'
 mvn -pl demo-consumer spring-boot:run
 ```
 
@@ -54,8 +65,10 @@ curl -X POST 'http://127.0.0.1:8088/demo/submit' \
   -d '{
     "groupCode":"demo-group",
     "userId":"u1",
+    "bizKey":"order-1001",
     "priority":90,
     "retryDelaySec":20,
+    "extInfo":"{\"step\":0}",
     "payload":"hello"
   }'
 ```
@@ -65,6 +78,8 @@ curl -X POST 'http://127.0.0.1:8088/demo/submit' \
 - `retryDelaySec` 为单任务重试间隔，单位秒
 - 例如设置为 `20`，则任务失败后的下一次调度时间会延后 20 秒
 - 若不传，则使用全局配置 `scheduler.default-retry-delay-sec`
+- 幂等键为 `bizType + bizKey`（demo 中 `bizType` 固定为 `demo.biz.process`）
+- `extInfo` 为可选字符串扩展信息，任务重试时可使用上轮执行写回的最新值
 
 2. 查询业务状态：
 

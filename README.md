@@ -9,13 +9,14 @@
 - DB 状态机 + Redis 调度加速
 - 宕机恢复（心跳超时自动回收重试）
 - 可选业务状态查询接口（业务已完成/失败则不重复执行）
+- `ext_info` 跨重试传递（支持保存中间结果、实现多阶段任务）
 
 ## 1. 核心设计
 
 - DB 是最终真相：任务状态、执行记录都在 MySQL
 - Redis 是协作层：time/ready 双队列 + 并发计数 + lease
 - 调度两阶段：先 `time`，后 `ready`
-- 至少一次语义：通过 `task_no/biz_key` 做业务幂等
+- 至少一次语义：通过 `biz_type + biz_key` 做业务幂等（`task_no` 仅用于调度内部追踪）
 
 ## 2. 两阶段调度（保障吞吐 + 优先级）
 
@@ -144,7 +145,7 @@ public void submitDemo() {
             .setBizKey("biz-key-001")
             .setPriority(90)
             .setRetryDelaySec(20)
-            .setExt(Map.of("prompt", "hello"));
+            .setExtInfo("{\"prompt\":\"hello\"}");
     // executeAt 默认当前时间（立即执行）；maxRetryCount 默认 3
     long taskId = schedulerClient.submit(req);
 }
@@ -152,11 +153,22 @@ public void submitDemo() {
 
 补充说明：
 
+- `bizKey`：必填，和 `bizType` 一起作为提交幂等键
+- `extInfo`：可选字符串，会透传给 `TaskHandler`；若执行结果返回新的 `extInfo`，调度器会写回 DB，后续重试拿到最新值
 - `retryDelaySec`：单任务重试间隔（秒），可选
 - 若未设置，则回退到全局配置 `scheduler.default-retry-delay-sec`
 - 该参数会影响失败重试、业务状态延后重检、恢复补偿后的下次执行时间
 
-### 5.2 注册任务执行器（必须）
+### 5.2 `ext_info` 中间结果传递（多阶段任务）
+
+- 提交任务时可写入初始 `extInfo`（字符串）
+- `TaskHandler` 执行后可在 `TaskExecuteResult` 中返回新的 `extInfo`
+- 调度器会把新的 `extInfo` 持久化到 `scheduler_task.ext_info`
+- 任务进入下一轮重试/执行时，`SchedulerTask.extInfo` 即为上轮最新值
+
+这使得任务可以在多次执行中逐步推进，并保存每一阶段的中间结果。
+
+### 5.3 注册任务执行器（必须）
 
 ```java
 @Component
@@ -185,7 +197,7 @@ public class ImageRenderHandler implements TaskHandler {
 - 普通超时（可中断）会按重试策略处理
 - 若判定为 `TASK_TIMEOUT_UNINTERRUPTIBLE`，会继续按重试策略重派（直到达到 `maxRetryCount`）；该场景可能出现“旧执行线程尚未退出 + 新重试已开始”，必须由业务幂等兜底
 
-### 5.3 业务状态查询接口（可选）
+### 5.4 业务状态查询接口（可选）
 
 如你有业务表状态，希望“已完成/已失败不再重复调度”，实现：
 

@@ -27,14 +27,10 @@ public class DemoController {
         String bizKey = request.bizKey() == null || request.bizKey().isBlank()
                 ? "biz-" + UUID.randomUUID().toString().replace("-", "")
                 : request.bizKey();
-        String taskNo = request.taskNo() == null || request.taskNo().isBlank()
-                ? "task-" + UUID.randomUUID().toString().replace("-", "")
-                : request.taskNo();
 
         bizTaskRepository.insert(bizKey, request.payload() == null ? "{}" : request.payload());
 
         TaskSubmitRequest submitRequest = new TaskSubmitRequest()
-                .setTaskNo(taskNo)
                 .setGroupCode(request.groupCode() == null ? "demo-group" : request.groupCode())
                 .setUserId(request.userId() == null ? "demo-user" : request.userId())
                 .setBizType("demo.biz.process")
@@ -44,10 +40,12 @@ public class DemoController {
                 .setMaxRetryCount(request.maxRetryCount())
                 .setExecuteTimeoutSec(request.executeTimeoutSec() == null ? 60 : request.executeTimeoutSec())
                 .setRetryDelaySec(request.retryDelaySec())
-                .setExt(request.forceRetry() != null && request.forceRetry() ? Map.of("force_retry", true) : Map.of());
+                .setExtInfo(request.extInfo() == null || request.extInfo().isBlank()
+                        ? (request.forceRetry() != null && request.forceRetry() ? "{\"force_retry\":true}" : null)
+                        : request.extInfo());
         long taskId = schedulerClient.submit(submitRequest);
 
-        return Map.of("taskId", taskId, "taskNo", taskNo, "bizKey", bizKey);
+        return Map.of("taskId", taskId, "bizKey", bizKey);
     }
 
     @PostMapping("/biz/{bizKey}/status/{status}")
@@ -62,7 +60,6 @@ public class DemoController {
     }
 
     public record SubmitRequest(
-            String taskNo,
             String groupCode,
             String userId,
             String bizKey,
@@ -71,6 +68,7 @@ public class DemoController {
             Integer executeTimeoutSec,
             Integer retryDelaySec,
             LocalDateTime executeAt,
+            String extInfo,
             String payload,
             Boolean forceRetry
     ) {

@@ -20,7 +20,19 @@ public final class RedisKeys {
         return "sched:user:running:" + group + ":" + userId;
     }
 
+    public static String userRunningPrefix(String group) {
+        return "sched:user:running:" + group + ":";
+    }
+
+    public static String userRunningPattern(String group) {
+        return userRunningPrefix(group) + "*";
+    }
+
     public static String taskLease(long taskId) {
         return "sched:task:lease:" + taskId;
+    }
+
+    public static String reconcileLock() {
+        return "sched:reconcile:lock";
     }
 }

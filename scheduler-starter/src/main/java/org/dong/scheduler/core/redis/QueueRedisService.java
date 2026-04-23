@@ -4,7 +4,8 @@ import org.dong.scheduler.core.model.SchedulerTask;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ZSetOperations;
 
-import java.time.ZoneOffset;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -12,6 +13,7 @@ import java.util.Set;
 public class QueueRedisService {
     private static final long SCORE_MULTIPLIER = 10_000_000_000_000L;
     private static final int MAX_PRIORITY = 99_999;
+    private static final ZoneId SYSTEM_ZONE = ZoneId.systemDefault();
 
     private final StringRedisTemplate redisTemplate;
 
@@ -20,7 +22,7 @@ public class QueueRedisService {
     }
 
     public void enqueue(SchedulerTask task) {
-        long executeAt = task.getExecuteAt().toInstant(ZoneOffset.UTC).toEpochMilli();
+        long executeAt = toEpochMillis(task.getExecuteAt());
         redisTemplate.opsForZSet().add(RedisKeys.timeQueue(task.getGroupCode()), task.getId().toString(), executeAt);
     }
 
@@ -41,9 +43,13 @@ public class QueueRedisService {
     }
 
     public void addToReady(SchedulerTask task) {
-        long createTs = task.getCreateTime().toInstant(ZoneOffset.UTC).toEpochMilli();
+        long createTs = toEpochMillis(task.getCreateTime());
         long score = ((long) (MAX_PRIORITY - task.getPriority())) * SCORE_MULTIPLIER + createTs;
         redisTemplate.opsForZSet().add(RedisKeys.readyQueue(task.getGroupCode()), task.getId().toString(), score);
+    }
+
+    private long toEpochMillis(LocalDateTime time) {
+        return time.atZone(SYSTEM_ZONE).toInstant().toEpochMilli();
     }
 
     public List<Long> peekReady(String groupCode, int limit) {

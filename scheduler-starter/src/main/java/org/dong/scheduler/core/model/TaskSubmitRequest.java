@@ -6,7 +6,6 @@ import lombok.NoArgsConstructor;
 import lombok.experimental.Accessors;
 
 import java.time.LocalDateTime;
-import java.util.Map;
 
 /**
  * 任务提交参数。
@@ -16,7 +15,6 @@ import java.util.Map;
  *   <li>executeAt: 当前时间（立即执行）</li>
  *   <li>maxRetryCount: 3</li>
  *   <li>priority: 0</li>
- *   <li>taskNo: 自动生成</li>
  * </ul>
  */
 @Data
@@ -37,7 +35,7 @@ public class TaskSubmitRequest {
      */
     private String bizType;
     /**
-     * 业务幂等键，可选。
+     * 业务幂等键（必填，和 bizType 组成提交幂等键）。
      */
     private String bizKey;
     /**
@@ -61,11 +59,7 @@ public class TaskSubmitRequest {
      */
     private Integer retryDelaySec;
     /**
-     * 扩展参数，可选。
+     * 扩展信息（字符串），可选。
      */
-    private Map<String, Object> ext;
-    /**
-     * 任务唯一号；由调度器自动生成。
-     */
-    private String taskNo;
+    private String extInfo;
 }

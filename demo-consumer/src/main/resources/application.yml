@@ -3,10 +3,21 @@ server:
 
 spring:
   datasource:
-    url: ${DEMO_DB_URL:jdbc:mysql://127.0.0.1:3306/scheduler_demo?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false}
+    url: ${DEMO_DB_URL:jdbc:mysql://127.0.0.1:3306/scheduler_demo?useUnicode=true&characterEncoding=utf8&serverTimezone=SYSTEM&allowPublicKeyRetrieval=true&useSSL=false}
     username: ${DEMO_DB_USERNAME:root}
     password: ${DEMO_DB_PASSWORD:root}
     driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      pool-name: ${DEMO_DB_POOL_NAME:scheduler-hikari}
+      minimum-idle: ${DEMO_DB_MIN_IDLE:12}
+      maximum-pool-size: ${DEMO_DB_MAX_POOL_SIZE:40}
+      max-lifetime: ${DEMO_DB_MAX_LIFETIME_MS:1700000}
+      idle-timeout: ${DEMO_DB_IDLE_TIMEOUT_MS:300000}
+      keepalive-time: ${DEMO_DB_KEEPALIVE_MS:300000}
+      validation-timeout: ${DEMO_DB_VALIDATION_TIMEOUT_MS:5000}
+      connection-timeout: ${DEMO_DB_CONNECTION_TIMEOUT_MS:10000}
+      initialization-fail-timeout: ${DEMO_DB_INIT_FAIL_TIMEOUT_MS:1}
+      leak-detection-threshold: ${DEMO_DB_LEAK_DETECT_MS:0}
   data:
     redis:
       host: 127.0.0.1

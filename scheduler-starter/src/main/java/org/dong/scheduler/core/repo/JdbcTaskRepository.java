@@ -12,7 +12,9 @@ import java.sql.PreparedStatement;
 import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -24,7 +26,7 @@ public class JdbcTaskRepository implements TaskRepository {
     }
 
     @Override
-    public long insert(TaskSubmitRequest request, String extJson, TaskStatus status) {
+    public long insert(String taskNo, TaskSubmitRequest request, String extInfo, TaskStatus status) {
         KeyHolder keyHolder = new GeneratedKeyHolder();
         try {
             jdbcTemplate.update(connection -> {
@@ -33,10 +35,10 @@ public class JdbcTaskRepository implements TaskRepository {
                             task_no, group_code, user_id, biz_type, biz_key,
                             status, priority, execute_at, next_retry_at,
                             retry_count, max_retry_count, execute_timeout_sec, retry_delay_sec,
-                            version, ext_json, create_time, update_time
+                            version, ext_info, create_time, update_time
                         ) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,now(),now())
                         """, Statement.RETURN_GENERATED_KEYS);
-                ps.setString(1, request.getTaskNo());
+                ps.setString(1, taskNo);
                 ps.setString(2, request.getGroupCode());
                 ps.setString(3, request.getUserId());
                 ps.setString(4, request.getBizType());
@@ -58,11 +60,13 @@ public class JdbcTaskRepository implements TaskRepository {
                     ps.setInt(13, request.getRetryDelaySec());
                 }
                 ps.setInt(14, 0);
-                ps.setString(15, extJson);
+                ps.setString(15, extInfo);
                 return ps;
             }, keyHolder);
         } catch (DuplicateKeyException e) {
-            return findByTaskNo(request.getTaskNo()).map(SchedulerTask::getId)
+            return findByBizTypeAndBizKey(request.getBizType(), request.getBizKey())
+                    .or(() -> findByTaskNo(taskNo))
+                    .map(SchedulerTask::getId)
                     .orElseThrow(() -> e);
         }
         return Objects.requireNonNull(keyHolder.getKey()).longValue();
@@ -77,6 +81,14 @@ public class JdbcTaskRepository implements TaskRepository {
     @Override
     public Optional<SchedulerTask> findByTaskNo(String taskNo) {
         List<SchedulerTask> list = jdbcTemplate.query("select * from scheduler_task where task_no = ?", this::mapTask, taskNo);
+        return list.stream().findFirst();
+    }
+
+    @Override
+    public Optional<SchedulerTask> findByBizTypeAndBizKey(String bizType, String bizKey) {
+        List<SchedulerTask> list = jdbcTemplate.query("""
+                select * from scheduler_task where biz_type = ? and biz_key = ?
+                """, this::mapTask, bizType, bizKey);
         return list.stream().findFirst();
     }
 
@@ -146,6 +158,15 @@ public class JdbcTaskRepository implements TaskRepository {
                    set heartbeat_time=?, update_time=now()
                  where id=? and status='RUNNING'
                 """, Timestamp.valueOf(now), id) > 0;
+    }
+
+    @Override
+    public void updateExtInfo(Long id, String extInfo, LocalDateTime now) {
+        jdbcTemplate.update("""
+                update scheduler_task
+                   set ext_info=?, update_time=?, version=version+1
+                 where id=?
+                """, extInfo, Timestamp.valueOf(now), id);
     }
 
     @Override
@@ -221,6 +242,31 @@ public class JdbcTaskRepository implements TaskRepository {
                 """, status.name(), Timestamp.valueOf(now), Timestamp.valueOf(now), errorCode, errorMsg, executeNo);
     }
 
+    @Override
+    public long countRunningByGroup(String groupCode) {
+        Long count = jdbcTemplate.queryForObject("""
+                select count(1) from scheduler_task where group_code=? and status='RUNNING'
+                """, Long.class, groupCode);
+        return count == null ? 0L : count;
+    }
+
+    @Override
+    public Map<String, Long> countRunningByUserInGroup(String groupCode) {
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList("""
+                select user_id, count(1) as cnt
+                  from scheduler_task
+                 where group_code=? and status='RUNNING'
+                 group by user_id
+                """, groupCode);
+        Map<String, Long> result = new HashMap<>();
+        for (Map<String, Object> row : rows) {
+            String userId = (String) row.get("user_id");
+            Number cnt = (Number) row.get("cnt");
+            result.put(userId, cnt == null ? 0L : cnt.longValue());
+        }
+        return result;
+    }
+
     private SchedulerTask mapTask(java.sql.ResultSet rs, int rowNum) throws java.sql.SQLException {
         SchedulerTask task = new SchedulerTask();
         task.setId(rs.getLong("id"));
@@ -246,7 +292,7 @@ public class JdbcTaskRepository implements TaskRepository {
         task.setVersion(rs.getInt("version"));
         task.setErrorCode(rs.getString("error_code"));
         task.setErrorMsg(rs.getString("error_msg"));
-        task.setExtJson(rs.getString("ext_json"));
+        task.setExtInfo(rs.getString("ext_info"));
         task.setCreateTime(tsToLdt(rs.getTimestamp("create_time")));
         task.setUpdateTime(tsToLdt(rs.getTimestamp("update_time")));
         return task;

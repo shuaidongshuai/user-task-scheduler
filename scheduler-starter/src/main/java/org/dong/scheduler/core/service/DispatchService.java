@@ -14,12 +14,16 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.time.LocalDateTime;
-import java.time.ZoneOffset;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class DispatchService {
     private static final Logger log = LoggerFactory.getLogger(DispatchService.class);
+    private static final ZoneId SYSTEM_ZONE = ZoneId.systemDefault();
+    private static final int SUMMARY_LOG_EVERY_N = 5;
 
     private final SchedulerProperties properties;
     private final GroupConfigRepository groupConfigRepository;
@@ -29,6 +33,7 @@ public class DispatchService {
     private final DynamicUserLimitService dynamicUserLimitService;
     private final WorkerService workerService;
     private final Optional<BusinessTaskStateProvider> businessTaskStateProvider;
+    private final ConcurrentHashMap<String, AtomicInteger> groupSummaryLogCounter = new ConcurrentHashMap<>();
 
     public DispatchService(SchedulerProperties properties,
                            GroupConfigRepository groupConfigRepository,
@@ -50,7 +55,7 @@ public class DispatchService {
 
     public void dispatchOnce() {
         List<GroupConfig> groups = groupConfigRepository.listEnabled();
-        long nowMillis = LocalDateTime.now().toInstant(ZoneOffset.UTC).toEpochMilli();
+        long nowMillis = LocalDateTime.now().atZone(SYSTEM_ZONE).toInstant().toEpochMilli();
         log.debug("dispatch tick start, enabledGroups={}", groups.size());
 
         for (GroupConfig cfg : groups) {
@@ -133,7 +138,7 @@ public class DispatchService {
                             task.getId(), task.getTaskNo(), task.getGroupCode());
                     continue;
                 }
-                if (state != BusinessTaskState.NEED_RUNNING) {
+                if (state != BusinessTaskState.NEED_RUNNING && state != BusinessTaskState.RUNNING) {
                     LocalDateTime nextCheckAt = nextRetryTime(task);
                     boolean deferred = taskRepository.rescheduleToRunnable(
                             task.getId(),
@@ -169,7 +174,12 @@ public class DispatchService {
 
             boolean cas = taskRepository.casToRunning(task.getId(), properties.getInstanceId(), Thread.currentThread().getName(), now);
             if (!cas) {
-                concurrencyGuard.release(cfg.getGroupCode(), task.getUserId(), task.getId(), executeNo);
+                boolean released = concurrencyGuard.release(cfg.getGroupCode(), task.getUserId(), task.getId(), executeNo);
+                if (!released) {
+                    concurrencyGuard.repairRelease(cfg.getGroupCode(), task.getUserId());
+                    log.warn("dispatch release mismatch, repaired running counters, taskId={}, taskNo={}, executeNo={}, group={}, user={}",
+                            task.getId(), task.getTaskNo(), executeNo, cfg.getGroupCode(), task.getUserId());
+                }
                 skipped++;
                 log.debug("dispatch CAS to RUNNING failed, taskId={}, taskNo={}, group={}",
                         task.getId(), task.getTaskNo(), cfg.getGroupCode());
@@ -184,7 +194,12 @@ public class DispatchService {
                 log.info("task dispatched, taskId={}, taskNo={}, executeNo={}, group={}, user={}, priority={}, groupRunningAfter={}",
                         task.getId(), task.getTaskNo(), executeNo, task.getGroupCode(), task.getUserId(), task.getPriority(), groupRunning);
             } catch (RuntimeException ex) {
-                concurrencyGuard.release(cfg.getGroupCode(), task.getUserId(), task.getId(), executeNo);
+                boolean released = concurrencyGuard.release(cfg.getGroupCode(), task.getUserId(), task.getId(), executeNo);
+                if (!released) {
+                    concurrencyGuard.repairRelease(cfg.getGroupCode(), task.getUserId());
+                    log.warn("dispatch submit rollback release mismatch, repaired running counters, taskId={}, taskNo={}, executeNo={}, group={}, user={}",
+                            task.getId(), task.getTaskNo(), executeNo, cfg.getGroupCode(), task.getUserId());
+                }
                 LocalDateTime nextCheckAt = nextRetryTime(task);
                 boolean rollback = taskRepository.rescheduleToRunnable(
                         task.getId(),
@@ -205,6 +220,11 @@ public class DispatchService {
         }
 
         if (dispatched > 0 || groupRunning > 0) {
+            AtomicInteger counter = groupSummaryLogCounter.computeIfAbsent(cfg.getGroupCode(), key -> new AtomicInteger(0));
+            int current = counter.incrementAndGet();
+            if (current % SUMMARY_LOG_EVERY_N != 0) {
+                return;
+            }
             log.info("dispatch group summary, group={}, promoted={}, readyScanned={}, dispatched={}, skipped={}, groupRunning={}, costMs={}",
                     cfg.getGroupCode(), promoted, ready.size(), dispatched, skipped, groupRunning, System.currentTimeMillis() - begin);
         }

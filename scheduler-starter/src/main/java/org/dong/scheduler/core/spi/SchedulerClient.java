@@ -10,10 +10,9 @@ public interface SchedulerClient {
      * <ul>
      *   <li>executeAt 默认当前时间（立即运行）</li>
      *   <li>maxRetryCount 默认 3</li>
-     *   <li>taskNo 为空时自动生成</li>
      * </ul>
      *
-     * <p>必填参数：groupCode、userId、bizType。</p>
+     * <p>必填参数：groupCode、userId、bizType、bizKey。</p>
      */
     long submit(TaskSubmitRequest request);
 
