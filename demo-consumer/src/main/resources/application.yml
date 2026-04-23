@@ -1,0 +1,29 @@
+server:
+  port: 8088
+
+spring:
+  datasource:
+    url: ${DEMO_DB_URL:jdbc:mysql://127.0.0.1:3306/scheduler_demo?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&useSSL=false}
+    username: ${DEMO_DB_USERNAME:root}
+    password: ${DEMO_DB_PASSWORD:root}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  data:
+    redis:
+      host: 127.0.0.1
+      port: 6379
+
+scheduler:
+  enabled: true
+  dispatch-interval-ms: 500
+  recovery-interval-ms: 10000
+  queue-refill-interval-ms: 10000
+  worker-threads: 8
+  heartbeat-interval-sec: 5
+  default-retry-delay-sec: 5
+  default-execute-timeout-sec: 60
+  timeout-interrupt-grace-sec: 5
+
+logging:
+  level:
+    org.dong.scheduler: INFO
+    org.dong.demo: DEBUG
