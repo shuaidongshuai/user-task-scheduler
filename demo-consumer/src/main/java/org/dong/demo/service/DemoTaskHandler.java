@@ -38,7 +38,7 @@ public class DemoTaskHandler implements TaskHandler {
             return TaskExecuteResult.failed("RETRYABLE_FAIL", "simulated retry before success", true, nextExtInfo);
         }
 
-        Thread.sleep(5000L);
+        Thread.sleep(2000L);
         demoBizTaskRepository.updateStatus(bizKey, "SUCCESS");
         log.info("task success, taskId={}, bizKey={}, extInfo={}", task.getId(), bizKey, task.getExtInfo());
         return TaskExecuteResult.success(task.getExtInfo());

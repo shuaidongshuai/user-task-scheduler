@@ -1,5 +1,5 @@
 server:
-  port: 8088
+  port: 8099
 
 spring:
   datasource:
@@ -11,9 +11,11 @@ spring:
       pool-name: ${DEMO_DB_POOL_NAME:scheduler-hikari}
       minimum-idle: ${DEMO_DB_MIN_IDLE:12}
       maximum-pool-size: ${DEMO_DB_MAX_POOL_SIZE:40}
-      max-lifetime: ${DEMO_DB_MAX_LIFETIME_MS:1700000}
+      # Keep maxLifetime safely below common MySQL wait_timeout settings.
+      max-lifetime: ${DEMO_DB_MAX_LIFETIME_MS:540000}
       idle-timeout: ${DEMO_DB_IDLE_TIMEOUT_MS:300000}
-      keepalive-time: ${DEMO_DB_KEEPALIVE_MS:300000}
+      # Periodically ping idle connections so middleboxes/MySQL won't drop them silently.
+      keepalive-time: ${DEMO_DB_KEEPALIVE_MS:120000}
       validation-timeout: ${DEMO_DB_VALIDATION_TIMEOUT_MS:5000}
       connection-timeout: ${DEMO_DB_CONNECTION_TIMEOUT_MS:10000}
       initialization-fail-timeout: ${DEMO_DB_INIT_FAIL_TIMEOUT_MS:1}
