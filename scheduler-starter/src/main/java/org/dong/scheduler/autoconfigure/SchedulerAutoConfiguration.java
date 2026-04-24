@@ -153,8 +153,16 @@ public class SchedulerAutoConfiguration {
     @Bean
     @ConditionalOnMissingBean
     public SchedulerClient schedulerClient(TaskRepository taskRepository,
-                                           QueueRedisService queueRedisService) {
-        return new DefaultSchedulerClient(taskRepository, queueRedisService);
+                                           QueueRedisService queueRedisService,
+                                           SchedulerProperties properties) {
+        return new DefaultSchedulerClient(taskRepository, queueRedisService, properties);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public DefaultGroupInitializer defaultGroupInitializer(SchedulerProperties properties,
+                                                           org.springframework.jdbc.core.JdbcTemplate jdbcTemplate) {
+        return new DefaultGroupInitializer(properties, jdbcTemplate);
     }
 
     private static String defaultInstanceId() {

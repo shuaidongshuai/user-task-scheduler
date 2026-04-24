@@ -7,6 +7,14 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 @ConfigurationProperties(prefix = "scheduler")
 public class SchedulerProperties {
     private boolean enabled = true;
+    private boolean autoInitDefaultGroup = true;
+    private String defaultGroupCode = "public-group";
+    private int defaultGroupMaxConcurrency = 100;
+    private int defaultGroupUserBaseConcurrency = 4;
+    private int defaultGroupDispatchBatchSize = 100;
+    private int defaultGroupHeartbeatTimeoutSec = 90;
+    private int defaultGroupLockExpireSec = 120;
+    private String defaultGroupDescription = "auto initialized default public group";
     private long dispatchIntervalMs = 500;
     private long recoveryIntervalMs = 30_000;
     private long queueRefillIntervalMs = 15_000;

@@ -1,5 +1,6 @@
 package org.dong.scheduler.core.service;
 
+import org.dong.scheduler.config.SchedulerProperties;
 import org.dong.scheduler.core.enums.TaskStatus;
 import org.dong.scheduler.core.model.SchedulerTask;
 import org.dong.scheduler.core.model.TaskSubmitRequest;
@@ -20,11 +21,14 @@ public class DefaultSchedulerClient implements SchedulerClient {
 
     private final TaskRepository taskRepository;
     private final QueueRedisService queueRedisService;
+    private final SchedulerProperties properties;
 
     public DefaultSchedulerClient(TaskRepository taskRepository,
-                                  QueueRedisService queueRedisService) {
+                                  QueueRedisService queueRedisService,
+                                  SchedulerProperties properties) {
         this.taskRepository = taskRepository;
         this.queueRedisService = queueRedisService;
+        this.properties = properties;
     }
 
     @Override
@@ -66,6 +70,9 @@ public class DefaultSchedulerClient implements SchedulerClient {
 
     private TaskSubmitRequest normalize(TaskSubmitRequest request) {
         Objects.requireNonNull(request, "request is null");
+        if (request.getGroupCode() == null || request.getGroupCode().isBlank()) {
+            request.setGroupCode(properties.getDefaultGroupCode());
+        }
         requireText(request.getGroupCode(), "groupCode is required");
         requireText(request.getUserId(), "userId is required");
         requireText(request.getBizType(), "bizType is required");

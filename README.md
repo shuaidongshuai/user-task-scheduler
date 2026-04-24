@@ -80,6 +80,13 @@ sequenceDiagram
 ```yaml
 scheduler:
   enabled: true
+  auto-init-default-group: true
+  default-group-code: public-group
+  default-group-max-concurrency: 100
+  default-group-user-base-concurrency: 4
+  default-group-dispatch-batch-size: 100
+  default-group-heartbeat-timeout-sec: 90
+  default-group-lock-expire-sec: 120
   dispatch-interval-ms: 500
   recovery-interval-ms: 30000
   queue-refill-interval-ms: 15000
@@ -90,11 +97,18 @@ scheduler:
   # instance-id: your-instance-id
 ```
 
-`group` 配置来自 DB 表 `scheduler_group_config`。
+`group` 配置来自 DB 表 `scheduler_group_config`。当 `auto-init-default-group=true` 时，框架会在启动时幂等插入默认公共 group（只在不存在时插入，不覆盖已有配置）。
 
 字段说明：
 
 - `enabled`：是否启用调度器（`false` 时不执行 dispatch/recover/refill）。推荐默认：`true`
+- `auto-init-default-group`：启动时自动确保默认公共 group 存在。推荐默认：`true`
+- `default-group-code`：默认公共 group 编码；提交任务未传 `groupCode` 时会使用该值。推荐默认：`public-group`
+- `default-group-max-concurrency`：默认公共 group 的全局最大并发。推荐默认：`100`
+- `default-group-user-base-concurrency`：默认公共 group 的单用户基础并发。推荐默认：`4`
+- `default-group-dispatch-batch-size`：默认公共 group 的每轮调度批大小。推荐默认：`100`
+- `default-group-heartbeat-timeout-sec`：默认公共 group 心跳超时阈值。推荐默认：`90`
+- `default-group-lock-expire-sec`：默认公共 group 任务租约过期时间。推荐默认：`120`
 - `dispatch-interval-ms`：调度周期（毫秒），越小调度越及时，但 Redis/DB 压力更高。推荐默认：`500`
 - `recovery-interval-ms`：恢复任务周期（毫秒），用于回收心跳超时任务。推荐默认：`30000`
 - `queue-refill-interval-ms`：队列补偿周期（毫秒），把 DB 中可运行任务补回 Redis 队列。推荐默认：`15000`
@@ -139,6 +153,7 @@ private SchedulerClient schedulerClient;
 
 public void submitDemo() {
     TaskSubmitRequest req = new TaskSubmitRequest()
+            // groupCode 可选；不传则回退到 scheduler.default-group-code
             .setGroupCode("image-render")
             .setUserId("user-1001")
             .setBizType("image.render")
@@ -154,6 +169,7 @@ public void submitDemo() {
 补充说明：
 
 - `bizKey`：必填，和 `bizType` 一起作为提交幂等键
+- `groupCode`：可选；为空时自动回退到 `scheduler.default-group-code`
 - `extInfo`：可选字符串，会透传给 `TaskHandler`；若执行结果返回新的 `extInfo`，调度器会写回 DB，后续重试拿到最新值
 - `retryDelaySec`：单任务重试间隔（秒），可选
 - 若未设置，则回退到全局配置 `scheduler.default-retry-delay-sec`

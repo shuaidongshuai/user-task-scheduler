@@ -21,9 +21,11 @@ CREATE DATABASE scheduler_demo DEFAULT CHARACTER SET utf8mb4;
 
 - [schema-mysql.sql](/Users/chenmingdong01/Documents/github/user-task-scheduler/scheduler-starter/src/main/resources/sql/schema-mysql.sql)
 
-3. 执行 demo 表与 group 初始化：
+3. 执行 demo 表初始化：
 
 - [demo-schema.sql](/Users/chenmingdong01/Documents/github/user-task-scheduler/demo-consumer/src/main/resources/sql/demo-schema.sql)
+
+说明：`scheduler_group_config` 默认公共组会在应用启动时自动幂等插入（可通过 `scheduler.auto-init-default-group` 控制），不再是运行前必需步骤。
 
 ## 3. 构建并启动
 
@@ -45,9 +47,9 @@ export DEMO_DB_PASSWORD='root'
 export DEMO_DB_POOL_NAME='scheduler-hikari'
 export DEMO_DB_MIN_IDLE='12'
 export DEMO_DB_MAX_POOL_SIZE='40'
-export DEMO_DB_MAX_LIFETIME_MS='1700000'
+export DEMO_DB_MAX_LIFETIME_MS='540000'
 export DEMO_DB_IDLE_TIMEOUT_MS='300000'
-export DEMO_DB_KEEPALIVE_MS='300000'
+export DEMO_DB_KEEPALIVE_MS='120000'
 export DEMO_DB_VALIDATION_TIMEOUT_MS='5000'
 export DEMO_DB_CONNECTION_TIMEOUT_MS='10000'
 export DEMO_DB_INIT_FAIL_TIMEOUT_MS='1'
@@ -63,7 +65,6 @@ mvn -pl demo-consumer spring-boot:run
 curl -X POST 'http://127.0.0.1:8088/demo/submit' \
   -H 'Content-Type: application/json' \
   -d '{
-    "groupCode":"demo-group",
     "userId":"u1",
     "bizKey":"order-1001",
     "priority":90,
@@ -78,6 +79,7 @@ curl -X POST 'http://127.0.0.1:8088/demo/submit' \
 - `retryDelaySec` 为单任务重试间隔，单位秒
 - 例如设置为 `20`，则任务失败后的下一次调度时间会延后 20 秒
 - 若不传，则使用全局配置 `scheduler.default-retry-delay-sec`
+- `groupCode` 可选；不传时自动回退到 `scheduler.default-group-code`（默认 `public-group`）
 - 幂等键为 `bizType + bizKey`（demo 中 `bizType` 固定为 `demo.biz.process`）
 - `extInfo` 为可选字符串扩展信息，任务重试时可使用上轮执行写回的最新值
 

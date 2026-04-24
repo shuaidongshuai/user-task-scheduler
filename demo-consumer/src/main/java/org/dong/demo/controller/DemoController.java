@@ -31,7 +31,7 @@ public class DemoController {
         bizTaskRepository.insert(bizKey, request.payload() == null ? "{}" : request.payload());
 
         TaskSubmitRequest submitRequest = new TaskSubmitRequest()
-                .setGroupCode(request.groupCode() == null ? "demo-group" : request.groupCode())
+                .setGroupCode(request.groupCode())
                 .setUserId(request.userId() == null ? "demo-user" : request.userId())
                 .setBizType("demo.biz.process")
                 .setBizKey(bizKey)

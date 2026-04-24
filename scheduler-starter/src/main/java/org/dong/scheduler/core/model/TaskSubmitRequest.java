@@ -23,7 +23,7 @@ import java.time.LocalDateTime;
 @Accessors(chain = true)
 public class TaskSubmitRequest {
     /**
-     * 任务组编码（必填）。
+     * 任务组编码（可选，未传时回退到 scheduler.default-group-code）。
      */
     private String groupCode;
     /**
