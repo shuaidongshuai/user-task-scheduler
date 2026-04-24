@@ -35,4 +35,8 @@ public final class RedisKeys {
     public static String reconcileLock() {
         return "sched:reconcile:lock";
     }
+
+    public static String groupReconcileThrottle(String group) {
+        return "sched:reconcile:throttle:" + group;
+    }
 }

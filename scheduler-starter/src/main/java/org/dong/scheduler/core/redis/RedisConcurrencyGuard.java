@@ -1,11 +1,17 @@
 package org.dong.scheduler.core.redis;
 
 import org.springframework.data.redis.connection.ReturnType;
+import org.springframework.data.redis.core.ScanOptions;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.Cursor;
+import org.springframework.data.redis.core.RedisCallback;
 
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -175,18 +181,33 @@ public class RedisConcurrencyGuard implements ConcurrencyGuard {
 
     @Override
     public Map<String, Long> listUserRunning(String groupCode) {
-        Set<String> keys = redisTemplate.keys(RedisKeys.userRunningPattern(groupCode));
-        if (keys == null || keys.isEmpty()) {
+        Set<String> keys = new HashSet<>();
+        redisTemplate.execute((RedisCallback<Void>) connection -> {
+            ScanOptions options = ScanOptions.scanOptions()
+                    .match(RedisKeys.userRunningPattern(groupCode))
+                    .count(200)
+                    .build();
+            try (Cursor<byte[]> cursor = connection.scan(options)) {
+                while (cursor.hasNext()) {
+                    keys.add(new String(cursor.next(), StandardCharsets.UTF_8));
+                }
+            }
+            return null;
+        });
+        if (keys.isEmpty()) {
             return Map.of();
         }
+        List<String> keyList = new ArrayList<>(keys);
+        List<String> values = redisTemplate.opsForValue().multiGet(keyList);
         Map<String, Long> result = new HashMap<>();
         String prefix = RedisKeys.userRunningPrefix(groupCode);
-        for (String key : keys) {
+        for (int i = 0; i < keyList.size(); i++) {
+            String key = keyList.get(i);
             String userId = key.startsWith(prefix) ? key.substring(prefix.length()) : null;
             if (userId == null || userId.isBlank()) {
                 continue;
             }
-            String value = redisTemplate.opsForValue().get(key);
+            String value = values == null ? null : values.get(i);
             long running = value == null ? 0L : Long.parseLong(value);
             result.put(userId, running);
         }
@@ -227,6 +248,16 @@ public class RedisConcurrencyGuard implements ConcurrencyGuard {
     public boolean tryAcquireReconcileLock(String owner, int lockSec) {
         Boolean ok = redisTemplate.opsForValue().setIfAbsent(
                 RedisKeys.reconcileLock(), owner, Duration.ofSeconds(Math.max(1, lockSec))
+        );
+        return Boolean.TRUE.equals(ok);
+    }
+
+    @Override
+    public boolean tryAcquireGroupReconcileThrottle(String groupCode, int throttleSec) {
+        Boolean ok = redisTemplate.opsForValue().setIfAbsent(
+                RedisKeys.groupReconcileThrottle(groupCode),
+                "1",
+                Duration.ofSeconds(Math.max(1, throttleSec))
         );
         return Boolean.TRUE.equals(ok);
     }

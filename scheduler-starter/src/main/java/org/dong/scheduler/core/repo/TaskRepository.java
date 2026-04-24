@@ -50,5 +50,7 @@ public interface TaskRepository {
 
     long countRunningByGroup(String groupCode);
 
+    long countRunningByUserInGroup(String groupCode, String userId);
+
     Map<String, Long> countRunningByUserInGroup(String groupCode);
 }

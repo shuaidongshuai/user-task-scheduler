@@ -32,7 +32,8 @@ public class DispatchService {
     private final ConcurrencyGuard concurrencyGuard;
     private final DynamicUserLimitService dynamicUserLimitService;
     private final WorkerService workerService;
-    private final Optional<BusinessTaskStateProvider> businessTaskStateProvider;
+    private final RecoveryService recoveryService;
+    private final BusinessTaskStateProviderRegistry businessTaskStateProviderRegistry;
     private final ConcurrentHashMap<String, AtomicInteger> groupSummaryLogCounter = new ConcurrentHashMap<>();
 
     public DispatchService(SchedulerProperties properties,
@@ -42,7 +43,8 @@ public class DispatchService {
                            ConcurrencyGuard concurrencyGuard,
                            DynamicUserLimitService dynamicUserLimitService,
                            WorkerService workerService,
-                           Optional<BusinessTaskStateProvider> businessTaskStateProvider) {
+                           RecoveryService recoveryService,
+                           BusinessTaskStateProviderRegistry businessTaskStateProviderRegistry) {
         this.properties = properties;
         this.groupConfigRepository = groupConfigRepository;
         this.taskRepository = taskRepository;
@@ -50,7 +52,8 @@ public class DispatchService {
         this.concurrencyGuard = concurrencyGuard;
         this.dynamicUserLimitService = dynamicUserLimitService;
         this.workerService = workerService;
-        this.businessTaskStateProvider = businessTaskStateProvider;
+        this.recoveryService = recoveryService;
+        this.businessTaskStateProviderRegistry = businessTaskStateProviderRegistry;
     }
 
     public void dispatchOnce() {
@@ -120,8 +123,9 @@ public class DispatchService {
                 continue;
             }
 
-            if (businessTaskStateProvider.isPresent()) {
-                BusinessTaskState state = businessTaskStateProvider.get().query(task);
+            BusinessTaskStateProvider stateProvider = businessTaskStateProviderRegistry.find(task.getBizType());
+            if (stateProvider != null) {
+                BusinessTaskState state = stateProvider.query(task);
                 if (state == BusinessTaskState.SUCCESS) {
                     taskRepository.markTerminalByBusinessState(task.getId(), TaskStatus.SUCCESS, now);
                     queueRedisService.removeFromReady(cfg.getGroupCode(), taskId);
@@ -176,9 +180,10 @@ public class DispatchService {
             if (!cas) {
                 boolean released = concurrencyGuard.release(cfg.getGroupCode(), task.getUserId(), task.getId(), executeNo);
                 if (!released) {
-                    concurrencyGuard.repairRelease(cfg.getGroupCode(), task.getUserId());
-                    log.warn("dispatch release mismatch, repaired running counters, taskId={}, taskNo={}, executeNo={}, group={}, user={}",
-                            task.getId(), task.getTaskNo(), executeNo, cfg.getGroupCode(), task.getUserId());
+                    String currentLease = concurrencyGuard.leaseValue(task.getId());
+                    log.warn("dispatch release mismatch, skip blind repair to avoid decrementing another execution counters, taskId={}, taskNo={}, executeNo={}, currentLease={}, group={}, user={}",
+                            task.getId(), task.getTaskNo(), executeNo, currentLease, cfg.getGroupCode(), task.getUserId());
+                    recoveryService.reconcileRunningCountersImmediately(cfg.getGroupCode(), task.getUserId(), "dispatch-cas-release-mismatch");
                 }
                 skipped++;
                 log.debug("dispatch CAS to RUNNING failed, taskId={}, taskNo={}, group={}",
@@ -196,9 +201,10 @@ public class DispatchService {
             } catch (RuntimeException ex) {
                 boolean released = concurrencyGuard.release(cfg.getGroupCode(), task.getUserId(), task.getId(), executeNo);
                 if (!released) {
-                    concurrencyGuard.repairRelease(cfg.getGroupCode(), task.getUserId());
-                    log.warn("dispatch submit rollback release mismatch, repaired running counters, taskId={}, taskNo={}, executeNo={}, group={}, user={}",
-                            task.getId(), task.getTaskNo(), executeNo, cfg.getGroupCode(), task.getUserId());
+                    String currentLease = concurrencyGuard.leaseValue(task.getId());
+                    log.warn("dispatch submit rollback release mismatch, skip blind repair to avoid decrementing another execution counters, taskId={}, taskNo={}, executeNo={}, currentLease={}, group={}, user={}",
+                            task.getId(), task.getTaskNo(), executeNo, currentLease, cfg.getGroupCode(), task.getUserId());
+                    recoveryService.reconcileRunningCountersImmediately(cfg.getGroupCode(), task.getUserId(), "dispatch-submit-release-mismatch");
                 }
                 LocalDateTime nextCheckAt = nextRetryTime(task);
                 boolean rollback = taskRepository.rescheduleToRunnable(

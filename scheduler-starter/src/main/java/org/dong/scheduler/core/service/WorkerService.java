@@ -16,8 +16,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
 import jakarta.annotation.PreDestroy;
+
 import java.time.LocalDateTime;
-import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CountDownLatch;
@@ -39,25 +39,28 @@ public class WorkerService {
     private final TaskHandlerRegistry handlerRegistry;
     private final ConcurrencyGuard concurrencyGuard;
     private final QueueRedisService queueRedisService;
+    private final RecoveryService recoveryService;
     private final ThreadPoolTaskExecutor workerExecutor;
     private final ScheduledExecutorService heartbeatExecutor;
     private final ExecutorService invokeExecutor;
-    private final Optional<BusinessTaskStateProvider> businessTaskStateProvider;
+    private final BusinessTaskStateProviderRegistry businessTaskStateProviderRegistry;
 
     public WorkerService(SchedulerProperties properties,
                          TaskRepository taskRepository,
                          TaskHandlerRegistry handlerRegistry,
                          ConcurrencyGuard concurrencyGuard,
                          QueueRedisService queueRedisService,
+                         RecoveryService recoveryService,
                          ThreadPoolTaskExecutor workerExecutor,
-                         Optional<BusinessTaskStateProvider> businessTaskStateProvider) {
+                         BusinessTaskStateProviderRegistry businessTaskStateProviderRegistry) {
         this.properties = properties;
         this.taskRepository = taskRepository;
         this.handlerRegistry = handlerRegistry;
         this.concurrencyGuard = concurrencyGuard;
         this.queueRedisService = queueRedisService;
+        this.recoveryService = recoveryService;
         this.workerExecutor = workerExecutor;
-        this.businessTaskStateProvider = businessTaskStateProvider;
+        this.businessTaskStateProviderRegistry = businessTaskStateProviderRegistry;
         this.heartbeatExecutor = new ScheduledThreadPoolExecutor(Math.max(2, properties.getWorkerThreads() / 4));
         int invokeThreads = Math.max(2, properties.getWorkerThreads());
         BlockingQueue<Runnable> invokeQueue = new LinkedBlockingQueue<>(invokeThreads * 4);
@@ -109,8 +112,9 @@ public class WorkerService {
         String errorMsg = null;
 
         try {
-            if (businessTaskStateProvider.isPresent()) {
-                BusinessTaskState state = businessTaskStateProvider.get().query(task);
+            BusinessTaskStateProvider stateProvider = businessTaskStateProviderRegistry.find(task.getBizType());
+            if (stateProvider != null) {
+                BusinessTaskState state = stateProvider.query(task);
                 if (state == BusinessTaskState.SUCCESS) {
                     taskRepository.markSuccess(task.getId(), LocalDateTime.now());
                     finalStatus = TaskStatus.SUCCESS;
@@ -194,11 +198,11 @@ public class WorkerService {
             log.error("task execute exception, taskId={}", task.getId(), ex);
             errorCode = "TASK_EXCEPTION";
             errorMsg = ex.getMessage();
-                if (task.canRetry()) {
-                    LocalDateTime nextRetry = nextRetryTime(task);
-                    taskRepository.markWaitRetry(task.getId(), nextRetry, errorCode, errorMsg, LocalDateTime.now());
-                    taskRepository.findById(task.getId()).ifPresent(queueRedisService::enqueue);
-                    finalStatus = TaskStatus.WAIT_RETRY;
+            if (task.canRetry()) {
+                LocalDateTime nextRetry = nextRetryTime(task);
+                taskRepository.markWaitRetry(task.getId(), nextRetry, errorCode, errorMsg, LocalDateTime.now());
+                taskRepository.findById(task.getId()).ifPresent(queueRedisService::enqueue);
+                finalStatus = TaskStatus.WAIT_RETRY;
             } else {
                 taskRepository.markFailed(task.getId(), errorCode, errorMsg, LocalDateTime.now());
                 finalStatus = TaskStatus.FAILED;
@@ -207,9 +211,10 @@ public class WorkerService {
             heartbeat.cancel(true);
             boolean released = concurrencyGuard.release(task.getGroupCode(), task.getUserId(), task.getId(), executeNo);
             if (!released) {
-                concurrencyGuard.repairRelease(task.getGroupCode(), task.getUserId());
-                log.warn("worker release mismatch, repaired running counters, taskId={}, taskNo={}, executeNo={}, group={}, user={}",
-                        task.getId(), task.getTaskNo(), executeNo, task.getGroupCode(), task.getUserId());
+                String currentLease = concurrencyGuard.leaseValue(task.getId());
+                log.warn("worker release mismatch, skip blind repair to avoid decrementing another execution counters, taskId={}, taskNo={}, executeNo={}, currentLease={}, group={}, user={}",
+                        task.getId(), task.getTaskNo(), executeNo, currentLease, task.getGroupCode(), task.getUserId());
+                recoveryService.reconcileRunningCountersImmediately(task.getGroupCode(), task.getUserId(), "worker-release-mismatch");
             }
             taskRepository.finishExecution(executeNo, finalStatus, errorCode, errorMsg, LocalDateTime.now());
             long cost = System.currentTimeMillis() - begin;

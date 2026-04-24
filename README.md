@@ -205,6 +205,11 @@ public class ImageRenderHandler implements TaskHandler {
 @Component
 public class BizStateProvider implements BusinessTaskStateProvider {
     @Override
+    public String bizType() {
+        return "image.render";
+    }
+
+    @Override
     public BusinessTaskState query(SchedulerTask task) {
         // 读取业务表状态
         // 成功 -> SUCCESS
@@ -218,6 +223,7 @@ public class BizStateProvider implements BusinessTaskStateProvider {
 
 行为：
 
+- 仅当 `task.bizType == provider.bizType()` 时才会调用该 Provider
 - 返回 `SUCCESS`：调度器直接把任务置为 `SUCCESS`
 - 返回 `FAILED`：调度器直接把任务置为 `FAILED`
 - 仅返回 `NEED_RUNNING`：才会进入调度执行

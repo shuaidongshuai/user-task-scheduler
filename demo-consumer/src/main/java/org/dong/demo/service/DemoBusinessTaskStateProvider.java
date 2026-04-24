@@ -15,6 +15,11 @@ public class DemoBusinessTaskStateProvider implements BusinessTaskStateProvider 
     }
 
     @Override
+    public String bizType() {
+        return "demo.biz.process";
+    }
+
+    @Override
     public BusinessTaskState query(SchedulerTask task) {
         if (task.getBizKey() == null || task.getBizKey().isBlank()) {
             return BusinessTaskState.UNKNOWN;

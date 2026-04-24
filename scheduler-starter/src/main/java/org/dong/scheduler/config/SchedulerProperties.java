@@ -18,5 +18,6 @@ public class SchedulerProperties {
     private int defaultExecuteTimeoutSec = 600;
     private int timeoutInterruptGraceSec = 5;
     private int reconcileLockSec = 30;
+    private int immediateReconcileThrottleSec = 3;
     private String instanceId;
 }

@@ -38,7 +38,7 @@ public class DemoController {
                 .setPriority(request.priority() == null ? 50 : request.priority())
                 .setExecuteAt(request.executeAt())
                 .setMaxRetryCount(request.maxRetryCount())
-                .setExecuteTimeoutSec(request.executeTimeoutSec() == null ? 60 : request.executeTimeoutSec())
+                .setExecuteTimeoutSec(request.executeTimeoutSec() == null ? 1 : request.executeTimeoutSec())
                 .setRetryDelaySec(request.retryDelaySec())
                 .setExtInfo(request.extInfo() == null || request.extInfo().isBlank()
                         ? (request.forceRetry() != null && request.forceRetry() ? "{\"force_retry\":true}" : null)

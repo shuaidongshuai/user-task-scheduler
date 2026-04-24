@@ -27,6 +27,8 @@ public interface ConcurrencyGuard {
 
     boolean tryAcquireReconcileLock(String owner, int lockSec);
 
+    boolean tryAcquireGroupReconcileThrottle(String groupCode, int throttleSec);
+
     void releaseReconcileLock(String owner);
 
     void syncRunningCounters(String groupCode, long groupRunning, Map<String, Long> userRunningByUserId);

@@ -251,6 +251,14 @@ public class JdbcTaskRepository implements TaskRepository {
     }
 
     @Override
+    public long countRunningByUserInGroup(String groupCode, String userId) {
+        Long count = jdbcTemplate.queryForObject("""
+                select count(1) from scheduler_task where group_code=? and user_id=? and status='RUNNING'
+                """, Long.class, groupCode, userId);
+        return count == null ? 0L : count;
+    }
+
+    @Override
     public Map<String, Long> countRunningByUserInGroup(String groupCode) {
         List<Map<String, Object>> rows = jdbcTemplate.queryForList("""
                 select user_id, count(1) as cnt

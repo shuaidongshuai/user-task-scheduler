@@ -138,6 +138,33 @@ public class RecoveryService {
         }
     }
 
+    public boolean reconcileRunningCountersImmediately(String groupCode, String userId, String trigger) {
+        if (groupCode == null || groupCode.isBlank() || userId == null || userId.isBlank()) {
+            return false;
+        }
+        boolean throttledIn = concurrencyGuard.tryAcquireGroupReconcileThrottle(
+                groupCode, properties.getImmediateReconcileThrottleSec()
+        );
+        if (!throttledIn) {
+            log.debug("skip immediate running counter reconcile by throttle, group={}, user={}, trigger={}",
+                    groupCode, userId, trigger);
+            return false;
+        }
+
+        String owner = properties.getInstanceId() + ":" + UUID.randomUUID();
+        boolean locked = concurrencyGuard.tryAcquireReconcileLock(owner, properties.getReconcileLockSec());
+        if (!locked) {
+            log.debug("skip immediate running counter reconcile, lock held by another instance, group={}, user={}, trigger={}",
+                    groupCode, userId, trigger);
+            return false;
+        }
+        try {
+            return reconcileRunningCountersForGroupAndUser(groupCode, userId, trigger);
+        } finally {
+            concurrencyGuard.releaseReconcileLock(owner);
+        }
+    }
+
     private boolean reconcileRunningCountersForGroup(String groupCode) {
         long dbGroupRunning = taskRepository.countRunningByGroup(groupCode);
         long redisGroupRunning = concurrencyGuard.groupRunning(groupCode);
@@ -208,6 +235,37 @@ public class RecoveryService {
         long redisGroupAfter = concurrencyGuard.groupRunning(groupCode);
         log.warn("running counters reconciled (redis>db), group={}, redisGroupBefore={}, dbGroup={}, redisGroupAfter={}, overflowBefore={}, remainingOverflow={}",
                 groupCode, redisGroupRunning, dbGroupRunning, redisGroupAfter, originalRemaining, remaining);
+        return true;
+    }
+
+    private boolean reconcileRunningCountersForGroupAndUser(String groupCode, String userId, String trigger) {
+        long dbGroupRunning = taskRepository.countRunningByGroup(groupCode);
+        long redisGroupRunning = concurrencyGuard.groupRunning(groupCode);
+        if (redisGroupRunning <= dbGroupRunning) {
+            return false;
+        }
+
+        long overflow = redisGroupRunning - dbGroupRunning;
+        long dbUserRunning = taskRepository.countRunningByUserInGroup(groupCode, userId);
+        long redisUserRunning = concurrencyGuard.userRunning(groupCode, userId);
+        long reduced = 0L;
+        if (redisUserRunning > dbUserRunning) {
+            long expectedReduce = Math.min(redisUserRunning - dbUserRunning, overflow);
+            reduced = concurrencyGuard.reduceUserAndGroupRunning(groupCode, userId, expectedReduce);
+        }
+
+        long redisUserAfter = concurrencyGuard.userRunning(groupCode, userId);
+        if (redisUserAfter > dbUserRunning) {
+            concurrencyGuard.setUserRunning(groupCode, userId, dbUserRunning);
+        }
+
+        long redisGroupAfterUserFix = concurrencyGuard.groupRunning(groupCode);
+        if (redisGroupAfterUserFix > dbGroupRunning) {
+            concurrencyGuard.setGroupRunning(groupCode, dbGroupRunning);
+        }
+        long redisGroupAfter = concurrencyGuard.groupRunning(groupCode);
+        log.warn("running counters immediately reconciled by user hint, group={}, user={}, trigger={}, dbGroupRunning={}, redisGroupBefore={}, redisGroupAfter={}, dbUserRunning={}, redisUserBefore={}, redisUserAfter={}, reducedByScript={}",
+                groupCode, userId, trigger, dbGroupRunning, redisGroupRunning, redisGroupAfter, dbUserRunning, redisUserRunning, concurrencyGuard.userRunning(groupCode, userId), reduced);
         return true;
     }
 }
