@@ -190,8 +190,9 @@ public void submitDemo() {
 @Component
 public class ImageRenderHandler implements TaskHandler {
     @Override
-    public String bizType() {
-        return "image.render";
+    public List<String> bizTypes() {
+        // 一个处理器可绑定多个 bizType（处理逻辑相同时很有用）
+        return List.of("image.render", "image.upscale");
     }
 
     @Override
@@ -201,6 +202,8 @@ public class ImageRenderHandler implements TaskHandler {
     }
 }
 ```
+
+如果只需要一个业务类型，也需要返回单元素列表，例如 `List.of("image.render")`。
 
 `TaskHandler` 实现要求（强烈建议）：
 

@@ -3,6 +3,8 @@ package org.dong.scheduler.core.spi;
 import org.dong.scheduler.core.model.SchedulerTask;
 import org.dong.scheduler.core.model.TaskExecuteResult;
 
+import java.util.List;
+
 /**
  * 业务任务执行器。
  *
@@ -21,7 +23,7 @@ import org.dong.scheduler.core.model.TaskExecuteResult;
  * </ul>
  */
 public interface TaskHandler {
-    String bizType();
+    List<String> bizTypes();
 
     TaskExecuteResult execute(SchedulerTask task) throws Exception;
 }

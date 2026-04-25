@@ -67,7 +67,7 @@ class WorkerServiceReleaseMismatchTest {
         workerExecutor.setQueueCapacity(8);
         workerExecutor.initialize();
 
-        when(taskHandler.bizType()).thenReturn("demo.biz");
+        when(taskHandler.bizTypes()).thenReturn(List.of("demo.biz"));
         when(taskHandler.execute(any(SchedulerTask.class))).thenReturn(TaskExecuteResult.success());
         when(taskRepository.markSuccess(anyLong(), any(LocalDateTime.class))).thenReturn(true);
         when(concurrencyGuard.release("g1", "u1", 1L, "exec-old")).thenReturn(false);

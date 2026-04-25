@@ -8,6 +8,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
+import java.util.List;
+
 @Component
 public class DemoTaskHandler implements TaskHandler {
     private static final Logger log = LoggerFactory.getLogger(DemoTaskHandler.class);
@@ -19,8 +21,8 @@ public class DemoTaskHandler implements TaskHandler {
     }
 
     @Override
-    public String bizType() {
-        return "demo.biz.process";
+    public List<String> bizTypes() {
+        return List.of("demo.biz.process", "demo.biz.process.v2");
     }
 
     @Override
