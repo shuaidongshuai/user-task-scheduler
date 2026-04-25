@@ -1,15 +1,13 @@
 package org.dong.scheduler.autoconfigure;
 
+import lombok.extern.slf4j.Slf4j;
 import org.dong.scheduler.config.SchedulerProperties;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+@Slf4j
 public class DefaultGroupInitializer implements ApplicationRunner {
-    private static final Logger log = LoggerFactory.getLogger(DefaultGroupInitializer.class);
-
     private final SchedulerProperties properties;
     private final JdbcTemplate jdbcTemplate;
 

@@ -1,5 +1,6 @@
 package org.dong.scheduler.core.service;
 
+import lombok.extern.slf4j.Slf4j;
 import org.dong.scheduler.config.SchedulerProperties;
 import org.dong.scheduler.core.enums.TaskStatus;
 import org.dong.scheduler.core.model.SchedulerTask;
@@ -7,15 +8,13 @@ import org.dong.scheduler.core.model.TaskSubmitRequest;
 import org.dong.scheduler.core.redis.QueueRedisService;
 import org.dong.scheduler.core.repo.TaskRepository;
 import org.dong.scheduler.core.spi.SchedulerClient;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.time.LocalDateTime;
 import java.util.Objects;
 import java.util.UUID;
 
+@Slf4j
 public class DefaultSchedulerClient implements SchedulerClient {
-    private static final Logger log = LoggerFactory.getLogger(DefaultSchedulerClient.class);
     private static final int MIN_PRIORITY = 0;
     private static final int MAX_PRIORITY = 99_999;
 

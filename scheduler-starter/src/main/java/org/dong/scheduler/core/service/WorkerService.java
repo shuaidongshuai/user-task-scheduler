@@ -1,5 +1,6 @@
 package org.dong.scheduler.core.service;
 
+import lombok.extern.slf4j.Slf4j;
 import org.dong.scheduler.config.SchedulerProperties;
 import org.dong.scheduler.core.enums.BusinessTaskState;
 import org.dong.scheduler.core.enums.TaskStatus;
@@ -11,8 +12,6 @@ import org.dong.scheduler.core.redis.QueueRedisService;
 import org.dong.scheduler.core.repo.TaskRepository;
 import org.dong.scheduler.core.spi.BusinessTaskStateProvider;
 import org.dong.scheduler.core.spi.TaskHandler;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
 import jakarta.annotation.PreDestroy;
@@ -31,9 +30,8 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
+@Slf4j
 public class WorkerService {
-    private static final Logger log = LoggerFactory.getLogger(WorkerService.class);
-
     private final SchedulerProperties properties;
     private final TaskRepository taskRepository;
     private final TaskHandlerRegistry handlerRegistry;

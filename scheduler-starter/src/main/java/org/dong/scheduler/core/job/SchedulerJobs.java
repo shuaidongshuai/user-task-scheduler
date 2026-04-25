@@ -1,15 +1,13 @@
 package org.dong.scheduler.core.job;
 
+import lombok.extern.slf4j.Slf4j;
 import org.dong.scheduler.core.model.GroupConfig;
 import org.dong.scheduler.core.repo.GroupConfigRepository;
 import org.dong.scheduler.core.service.DispatchService;
 import org.dong.scheduler.core.service.RecoveryService;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
+@Slf4j
 public class SchedulerJobs {
-    private static final Logger log = LoggerFactory.getLogger(SchedulerJobs.class);
-
     private final DispatchService dispatchService;
     private final RecoveryService recoveryService;
     private final GroupConfigRepository groupConfigRepository;

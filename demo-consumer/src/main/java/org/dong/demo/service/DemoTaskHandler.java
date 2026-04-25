@@ -1,19 +1,17 @@
 package org.dong.demo.service;
 
+import lombok.extern.slf4j.Slf4j;
 import org.dong.demo.repo.DemoBizTaskRepository;
 import org.dong.scheduler.core.model.SchedulerTask;
 import org.dong.scheduler.core.model.TaskExecuteResult;
 import org.dong.scheduler.core.spi.TaskHandler;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
 
 @Component
+@Slf4j
 public class DemoTaskHandler implements TaskHandler {
-    private static final Logger log = LoggerFactory.getLogger(DemoTaskHandler.class);
-
     private final DemoBizTaskRepository demoBizTaskRepository;
 
     public DemoTaskHandler(DemoBizTaskRepository demoBizTaskRepository) {

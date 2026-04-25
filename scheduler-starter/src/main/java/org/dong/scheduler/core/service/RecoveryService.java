@@ -1,22 +1,20 @@
 package org.dong.scheduler.core.service;
 
+import lombok.extern.slf4j.Slf4j;
 import org.dong.scheduler.config.SchedulerProperties;
 import org.dong.scheduler.core.enums.TaskStatus;
 import org.dong.scheduler.core.model.SchedulerTask;
 import org.dong.scheduler.core.redis.ConcurrencyGuard;
 import org.dong.scheduler.core.redis.QueueRedisService;
 import org.dong.scheduler.core.repo.TaskRepository;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+@Slf4j
 public class RecoveryService {
-    private static final Logger log = LoggerFactory.getLogger(RecoveryService.class);
-
     private final SchedulerProperties properties;
     private final TaskRepository taskRepository;
     private final ConcurrencyGuard concurrencyGuard;
