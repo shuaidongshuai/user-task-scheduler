@@ -3,7 +3,6 @@ package org.dong.scheduler.core.repo;
 import org.dong.scheduler.core.enums.TaskStatus;
 import org.dong.scheduler.core.model.SchedulerTask;
 import org.dong.scheduler.core.model.TaskSubmitRequest;
-import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
 import org.springframework.jdbc.support.KeyHolder;
@@ -28,47 +27,40 @@ public class JdbcTaskRepository implements TaskRepository {
     @Override
     public long insert(String taskNo, TaskSubmitRequest request, String extInfo, TaskStatus status) {
         KeyHolder keyHolder = new GeneratedKeyHolder();
-        try {
-            jdbcTemplate.update(connection -> {
-                PreparedStatement ps = connection.prepareStatement("""
-                        insert into scheduler_task(
-                            task_no, group_code, user_id, biz_type, biz_key,
-                            status, priority, execute_at, next_retry_at,
-                            retry_count, max_retry_count, execute_timeout_sec, retry_delay_sec,
-                            version, ext_info, create_time, update_time
-                        ) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,now(),now())
-                        """, Statement.RETURN_GENERATED_KEYS);
-                ps.setString(1, taskNo);
-                ps.setString(2, request.getGroupCode());
-                ps.setString(3, request.getUserId());
-                ps.setString(4, request.getBizType());
-                ps.setString(5, request.getBizKey());
-                ps.setString(6, status.name());
-                ps.setInt(7, request.getPriority());
-                ps.setTimestamp(8, Timestamp.valueOf(request.getExecuteAt()));
-                ps.setTimestamp(9, null);
-                ps.setInt(10, 0);
-                ps.setInt(11, request.getMaxRetryCount());
-                if (request.getExecuteTimeoutSec() == null) {
-                    ps.setObject(12, null);
-                } else {
-                    ps.setInt(12, request.getExecuteTimeoutSec());
-                }
-                if (request.getRetryDelaySec() == null) {
-                    ps.setObject(13, null);
-                } else {
-                    ps.setInt(13, request.getRetryDelaySec());
-                }
-                ps.setInt(14, 0);
-                ps.setString(15, extInfo);
-                return ps;
-            }, keyHolder);
-        } catch (DuplicateKeyException e) {
-            return findByBizTypeAndBizKey(request.getBizType(), request.getBizKey())
-                    .or(() -> findByTaskNo(taskNo))
-                    .map(SchedulerTask::getId)
-                    .orElseThrow(() -> e);
-        }
+        jdbcTemplate.update(connection -> {
+            PreparedStatement ps = connection.prepareStatement("""
+                    insert into scheduler_task(
+                        task_no, group_code, user_id, biz_type, biz_key,
+                        status, priority, execute_at, next_retry_at,
+                        retry_count, max_retry_count, execute_timeout_sec, retry_delay_sec,
+                        version, ext_info, create_time, update_time
+                    ) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,now(),now())
+                    """, Statement.RETURN_GENERATED_KEYS);
+            ps.setString(1, taskNo);
+            ps.setString(2, request.getGroupCode());
+            ps.setString(3, request.getUserId());
+            ps.setString(4, request.getBizType());
+            ps.setString(5, request.getBizKey());
+            ps.setString(6, status.name());
+            ps.setInt(7, request.getPriority());
+            ps.setTimestamp(8, Timestamp.valueOf(request.getExecuteAt()));
+            ps.setTimestamp(9, null);
+            ps.setInt(10, 0);
+            ps.setInt(11, request.getMaxRetryCount());
+            if (request.getExecuteTimeoutSec() == null) {
+                ps.setObject(12, null);
+            } else {
+                ps.setInt(12, request.getExecuteTimeoutSec());
+            }
+            if (request.getRetryDelaySec() == null) {
+                ps.setObject(13, null);
+            } else {
+                ps.setInt(13, request.getRetryDelaySec());
+            }
+            ps.setInt(14, 0);
+            ps.setString(15, extInfo);
+            return ps;
+        }, keyHolder);
         return Objects.requireNonNull(keyHolder.getKey()).longValue();
     }
 
@@ -81,14 +73,6 @@ public class JdbcTaskRepository implements TaskRepository {
     @Override
     public Optional<SchedulerTask> findByTaskNo(String taskNo) {
         List<SchedulerTask> list = jdbcTemplate.query("select * from scheduler_task where task_no = ?", this::mapTask, taskNo);
-        return list.stream().findFirst();
-    }
-
-    @Override
-    public Optional<SchedulerTask> findByBizTypeAndBizKey(String bizType, String bizKey) {
-        List<SchedulerTask> list = jdbcTemplate.query("""
-                select * from scheduler_task where biz_type = ? and biz_key = ?
-                """, this::mapTask, bizType, bizKey);
         return list.stream().findFirst();
     }
 

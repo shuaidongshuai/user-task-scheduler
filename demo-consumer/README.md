@@ -80,7 +80,7 @@ curl -X POST 'http://127.0.0.1:8088/demo/submit' \
 - 例如设置为 `20`，则任务失败后的下一次调度时间会延后 20 秒
 - 若不传，则使用全局配置 `scheduler.default-retry-delay-sec`
 - `groupCode` 可选；不传时自动回退到 `scheduler.default-group-code`（默认 `public-group`）
-- 幂等键为 `bizType + bizKey`（demo 中 `bizType` 固定为 `demo.biz.process`）
+- `bizKey` 允许重复提交；调度内部唯一键是 `task_no`，业务幂等由业务侧控制（demo 中 `bizType` 固定为 `demo.biz.process`）
 - `extInfo` 为可选字符串扩展信息，任务重试时可使用上轮执行写回的最新值
 
 2. 查询业务状态：

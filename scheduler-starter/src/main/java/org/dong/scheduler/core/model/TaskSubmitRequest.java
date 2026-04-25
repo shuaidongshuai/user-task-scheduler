@@ -35,7 +35,7 @@ public class TaskSubmitRequest {
      */
     private String bizType;
     /**
-     * 业务幂等键（必填，和 bizType 组成提交幂等键）。
+     * 业务键（必填，可重复；是否幂等由业务侧自行控制）。
      */
     private String bizKey;
     /**

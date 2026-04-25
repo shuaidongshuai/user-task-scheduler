@@ -16,7 +16,7 @@
 - DB 是最终真相：任务状态、执行记录都在 MySQL
 - Redis 是协作层：time/ready 双队列 + 并发计数 + lease
 - 调度两阶段：先 `time`，后 `ready`
-- 至少一次语义：通过 `biz_type + biz_key` 做业务幂等（`task_no` 仅用于调度内部追踪）
+- 至少一次语义：调度内部唯一键是 `task_no`，业务幂等由业务侧自行保证
 
 ## 2. 两阶段调度（保障吞吐 + 优先级）
 
@@ -168,7 +168,7 @@ public void submitDemo() {
 
 补充说明：
 
-- `bizKey`：必填，和 `bizType` 一起作为提交幂等键
+- `bizKey`：必填，可重复；是否幂等由业务侧控制
 - `groupCode`：可选；为空时自动回退到 `scheduler.default-group-code`
 - `extInfo`：可选字符串，会透传给 `TaskHandler`；若执行结果返回新的 `extInfo`，调度器会写回 DB，后续重试拿到最新值
 - `retryDelaySec`：单任务重试间隔（秒），可选

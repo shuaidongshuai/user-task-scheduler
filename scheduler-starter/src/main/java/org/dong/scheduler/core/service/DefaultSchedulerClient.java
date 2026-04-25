@@ -34,14 +34,6 @@ public class DefaultSchedulerClient implements SchedulerClient {
     @Override
     public long submit(TaskSubmitRequest request) {
         TaskSubmitRequest normalized = normalize(request);
-        SchedulerTask existing = taskRepository.findByBizTypeAndBizKey(normalized.getBizType(), normalized.getBizKey())
-                .orElse(null);
-        if (existing != null) {
-            log.info("submit task request deduplicated, taskId={}, taskNo={}, group={}, user={}, bizType={}, bizKey={}",
-                    existing.getId(), existing.getTaskNo(), existing.getGroupCode(), existing.getUserId(),
-                    existing.getBizType(), existing.getBizKey());
-            return existing.getId();
-        }
         String taskNo = "task-" + UUID.randomUUID().toString().replace("-", "");
         LocalDateTime now = LocalDateTime.now();
         TaskStatus status = normalized.getExecuteAt().isAfter(now) ? TaskStatus.PENDING : TaskStatus.RUNNABLE;
@@ -52,10 +44,7 @@ public class DefaultSchedulerClient implements SchedulerClient {
 
         SchedulerTask task = taskRepository.findById(id)
                 .orElseThrow(() -> new IllegalStateException("task not found after insert: " + id));
-        // DuplicateKey race fallback may return an existing task id; existing tasks should not be re-enqueued.
-        if (taskNo.equals(task.getTaskNo())) {
-            queueRedisService.enqueue(task);
-        }
+        queueRedisService.enqueue(task);
         log.info("task submitted, taskId={}, taskNo={}, status={}, executeAt={}",
                 id, task.getTaskNo(), status, task.getExecuteAt());
         return id;

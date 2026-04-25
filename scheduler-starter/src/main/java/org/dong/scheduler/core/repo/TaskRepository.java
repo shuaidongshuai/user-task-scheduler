@@ -16,8 +16,6 @@ public interface TaskRepository {
 
     Optional<SchedulerTask> findByTaskNo(String taskNo);
 
-    Optional<SchedulerTask> findByBizTypeAndBizKey(String bizType, String bizKey);
-
     boolean casToRunning(Long id, String instanceId, String threadName, LocalDateTime now);
 
     boolean markSuccess(Long id, LocalDateTime now);

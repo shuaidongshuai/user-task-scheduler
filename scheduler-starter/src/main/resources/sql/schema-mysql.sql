@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS scheduler_task (
     group_code VARCHAR(64) NOT NULL COMMENT '任务组编码',
     user_id VARCHAR(64) NOT NULL COMMENT '用户ID',
     biz_type VARCHAR(64) NOT NULL COMMENT '业务类型（匹配TaskHandler）',
-    biz_key VARCHAR(128) NOT NULL COMMENT '业务键（和biz_type组成业务幂等键）',
+    biz_key VARCHAR(128) NOT NULL COMMENT '业务键（可重复，用于业务侧关联）',
 
     status VARCHAR(32) NOT NULL COMMENT '任务状态：PENDING/RUNNABLE/RUNNING/WAIT_RETRY/SUCCESS/FAILED/CANCELLED',
     priority INT NOT NULL DEFAULT 0 COMMENT '优先级，值越大优先级越高',
@@ -43,7 +43,7 @@ CREATE TABLE IF NOT EXISTS scheduler_task (
     INDEX idx_status_time (status, execute_at),
     INDEX idx_user_group_status (user_id, group_code, status),
     INDEX idx_heartbeat (status, heartbeat_time),
-    UNIQUE KEY uk_biz_type_biz_key (biz_type, biz_key)
+    INDEX idx_biz_type_biz_key (biz_type, biz_key)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='调度任务主表';
 
 CREATE TABLE IF NOT EXISTS scheduler_group_config (
