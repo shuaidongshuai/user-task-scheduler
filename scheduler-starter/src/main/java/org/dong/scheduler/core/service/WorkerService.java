@@ -153,8 +153,12 @@ public class WorkerService {
                 throw new IllegalStateException("no TaskHandler found for bizType=" + task.getBizType());
             }
 
-            TaskExecuteResult result = executeWithTimeout(task, handler);
-            persistExtInfoIfPresent(task, result.getExtInfo());
+            TaskExecuteResult result;
+            try {
+                result = executeWithTimeout(task, handler);
+            } finally {
+                persistTaskExtInfo(task);
+            }
             if (result.isSuccess()) {
                 taskRepository.markSuccess(task.getId(), LocalDateTime.now());
                 finalStatus = TaskStatus.SUCCESS;
@@ -274,12 +278,8 @@ public class WorkerService {
         return LocalDateTime.now().plusSeconds(task.retryDelaySec(properties.getDefaultRetryDelaySec()));
     }
 
-    private void persistExtInfoIfPresent(SchedulerTask task, String extInfo) {
-        if (extInfo == null) {
-            return;
-        }
-        taskRepository.updateExtInfo(task.getId(), extInfo, LocalDateTime.now());
-        task.setExtInfo(extInfo);
+    private void persistTaskExtInfo(SchedulerTask task) {
+        taskRepository.updateExtInfo(task.getId(), task.getExtInfo(), LocalDateTime.now());
     }
 
     @PreDestroy

@@ -33,14 +33,15 @@ public class DemoTaskHandler implements TaskHandler {
         if (task.getRetryCount() < 2) {
             demoBizTaskRepository.updateStatus(bizKey, "RUNNING");
             String nextExtInfo = "{\"last_retry_count\":" + (task.getRetryCount() + 1) + "}";
+            task.setExtInfo(nextExtInfo);
             log.info("simulate retryable fail before success, taskId={}, bizKey={}, retryCount={}",
                     task.getId(), bizKey, task.getRetryCount());
-            return TaskExecuteResult.failed("RETRYABLE_FAIL", "simulated retry before success", true, nextExtInfo);
+            return TaskExecuteResult.failed("RETRYABLE_FAIL", "simulated retry before success", true);
         }
 
         Thread.sleep(2000L);
         demoBizTaskRepository.updateStatus(bizKey, "SUCCESS");
         log.info("task success, taskId={}, bizKey={}, extInfo={}", task.getId(), bizKey, task.getExtInfo());
-        return TaskExecuteResult.success(task.getExtInfo());
+        return TaskExecuteResult.success();
     }
 }
