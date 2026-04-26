@@ -180,7 +180,8 @@ public class DispatchService {
                 boolean released = concurrencyGuard.release(cfg.getGroupCode(), task.getUserId(), task.getId(), executeNo);
                 if (!released) {
                     String currentLease = concurrencyGuard.leaseValue(task.getId());
-                    log.warn("dispatch release mismatch, skip blind repair to avoid decrementing another execution counters, taskId={}, taskNo={}, executeNo={}, currentLease={}, group={}, user={}",
+                    log.warn("dispatch release mismatch, skip blind repair to avoid decrementing another execution "
+                                    + "counters, taskId={}, taskNo={}, executeNo={}, currentLease={}, group={}, user={}",
                             task.getId(), task.getTaskNo(), executeNo, currentLease, cfg.getGroupCode(), task.getUserId());
                     recoveryService.reconcileRunningCountersImmediately(cfg.getGroupCode(), task.getUserId(), "dispatch-cas-release-mismatch");
                 }
@@ -201,7 +202,9 @@ public class DispatchService {
                 boolean released = concurrencyGuard.release(cfg.getGroupCode(), task.getUserId(), task.getId(), executeNo);
                 if (!released) {
                     String currentLease = concurrencyGuard.leaseValue(task.getId());
-                    log.warn("dispatch submit rollback release mismatch, skip blind repair to avoid decrementing another execution counters, taskId={}, taskNo={}, executeNo={}, currentLease={}, group={}, user={}",
+                    log.warn("dispatch submit rollback release mismatch, skip blind repair to avoid decrementing "
+                                    + "another execution counters, taskId={}, taskNo={}, executeNo={}, "
+                                    + "currentLease={}, group={}, user={}",
                             task.getId(), task.getTaskNo(), executeNo, currentLease, cfg.getGroupCode(), task.getUserId());
                     recoveryService.reconcileRunningCountersImmediately(cfg.getGroupCode(), task.getUserId(), "dispatch-submit-release-mismatch");
                 }

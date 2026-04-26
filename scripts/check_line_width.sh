@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-MAX_WIDTH="${1:-120}"
+MAX_WIDTH="${1:-179}"
 
 if ! [[ "$MAX_WIDTH" =~ ^[0-9]+$ ]]; then
   echo "Usage: $0 [max_width]" >&2

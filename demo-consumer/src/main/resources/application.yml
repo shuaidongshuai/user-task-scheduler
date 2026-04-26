@@ -37,6 +37,8 @@ scheduler:
   timeout-interrupt-grace-sec: 5
 
 logging:
+  pattern:
+    level: "%5p [trace_id:%X{trace_id:-}]"
   level:
     org.dong.scheduler: INFO
     org.dong.demo: DEBUG

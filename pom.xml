@@ -59,7 +59,7 @@
                         </configuration>
                         <executions>
                             <execution>
-                                <id>checkstyle-120-width</id>
+                                <id>checkstyle-179-width</id>
                                 <phase>verify</phase>
                                 <goals>
                                     <goal>check</goal>

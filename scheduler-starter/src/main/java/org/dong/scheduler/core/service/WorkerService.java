@@ -12,6 +12,7 @@ import org.dong.scheduler.core.redis.QueueRedisService;
 import org.dong.scheduler.core.repo.TaskRepository;
 import org.dong.scheduler.core.spi.BusinessTaskStateProvider;
 import org.dong.scheduler.core.spi.TaskHandler;
+import org.dong.scheduler.core.util.ThreadContextUtil;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
 import jakarta.annotation.PreDestroy;
@@ -75,7 +76,7 @@ public class WorkerService {
     public void submit(SchedulerTask task, GroupConfig groupConfig, String executeNo) {
         log.info("task submitted to worker pool, taskId={}, taskNo={}, executeNo={}, group={}, user={}",
                 task.getId(), task.getTaskNo(), executeNo, task.getGroupCode(), task.getUserId());
-        workerExecutor.execute(() -> run(task, groupConfig, executeNo));
+        workerExecutor.execute(ThreadContextUtil.addNewContext(() -> run(task, groupConfig, executeNo)));
     }
 
     private void run(SchedulerTask task, GroupConfig groupConfig, String executeNo) {
@@ -87,7 +88,7 @@ public class WorkerService {
         taskRepository.insertExecutionStart(task, executeNo, instanceId, instanceId, now);
 
         Future<?> heartbeat = heartbeatExecutor.scheduleAtFixedRate(
-                () -> {
+                ThreadContextUtil.addContext(() -> {
                     try {
                         taskRepository.heartbeat(task.getId(), LocalDateTime.now());
                         boolean renewed = concurrencyGuard.renewLease(task.getId(), executeNo, groupConfig.getLockExpireSec());
@@ -99,7 +100,7 @@ public class WorkerService {
                     } catch (Exception e) {
                         log.warn("heartbeat task failed, taskId={}, taskNo={}, executeNo={}", task.getId(), task.getTaskNo(), executeNo, e);
                     }
-                },
+                }),
                 properties.getHeartbeatIntervalSec(),
                 properties.getHeartbeatIntervalSec(),
                 TimeUnit.SECONDS
@@ -167,7 +168,8 @@ public class WorkerService {
                     taskRepository.markWaitRetry(task.getId(), nextRetry, errorCode, errorMsg, LocalDateTime.now());
                     taskRepository.findById(task.getId()).ifPresent(queueRedisService::enqueue);
                     finalStatus = TaskStatus.WAIT_RETRY;
-                    log.error("task timeout uninterruptible, retry scheduled (business idempotency required), taskId={}, taskNo={}, executeNo={}, nextRetryAt={}, retryCount={}/{}",
+                    log.error("task timeout uninterruptible, retry scheduled (business idempotency required), "
+                                    + "taskId={}, taskNo={}, executeNo={}, nextRetryAt={}, retryCount={}/{}",
                             task.getId(), task.getTaskNo(), executeNo, nextRetry, task.getRetryCount() + 1, task.getMaxRetryCount());
                 } else {
                     taskRepository.markFailed(task.getId(), errorCode, errorMsg, LocalDateTime.now());
@@ -182,7 +184,8 @@ public class WorkerService {
                 finalStatus = TaskStatus.WAIT_RETRY;
                 errorCode = result.getErrorCode();
                 errorMsg = result.getErrorMsg();
-                log.warn("task execute retry scheduled, taskId={}, taskNo={}, executeNo={}, errorCode={}, nextRetryAt={}, retryCount={}/{}",
+                log.warn("task execute retry scheduled, taskId={}, taskNo={}, executeNo={}, errorCode={}, "
+                                + "nextRetryAt={}, retryCount={}/{}",
                         task.getId(), task.getTaskNo(), executeNo, errorCode, nextRetry, task.getRetryCount() + 1, task.getMaxRetryCount());
             } else {
                 taskRepository.markFailed(task.getId(), result.getErrorCode(), result.getErrorMsg(), LocalDateTime.now());
@@ -210,7 +213,8 @@ public class WorkerService {
             boolean released = concurrencyGuard.release(task.getGroupCode(), task.getUserId(), task.getId(), executeNo);
             if (!released) {
                 String currentLease = concurrencyGuard.leaseValue(task.getId());
-                log.warn("worker release mismatch, skip blind repair to avoid decrementing another execution counters, taskId={}, taskNo={}, executeNo={}, currentLease={}, group={}, user={}",
+                log.warn("worker release mismatch, skip blind repair to avoid decrementing another execution "
+                                + "counters, taskId={}, taskNo={}, executeNo={}, currentLease={}, group={}, user={}",
                         task.getId(), task.getTaskNo(), executeNo, currentLease, task.getGroupCode(), task.getUserId());
                 recoveryService.reconcileRunningCountersImmediately(task.getGroupCode(), task.getUserId(), "worker-release-mismatch");
             }
@@ -228,14 +232,14 @@ public class WorkerService {
 
         AtomicReference<Thread> runningThread = new AtomicReference<>();
         CountDownLatch done = new CountDownLatch(1);
-        Future<TaskExecuteResult> future = invokeExecutor.submit(() -> {
+        Future<TaskExecuteResult> future = invokeExecutor.submit(ThreadContextUtil.addContext(() -> {
             runningThread.set(Thread.currentThread());
             try {
                 return handler.execute(task);
             } finally {
                 done.countDown();
             }
-        });
+        }));
         try {
             return future.get(timeoutSec, TimeUnit.SECONDS);
         } catch (java.util.concurrent.TimeoutException e) {

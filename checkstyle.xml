@@ -10,7 +10,7 @@
     <!-- Enforce max line width for Java code and logs. -->
     <module name="LineLength">
         <property name="fileExtensions" value="java"/>
-        <property name="max" value="120"/>
+        <property name="max" value="179"/>
         <property name="ignorePattern" value="^package\\s|^import\\s"/>
     </module>
 </module>

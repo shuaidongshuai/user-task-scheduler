@@ -2,6 +2,7 @@ package org.dong.scheduler.autoconfigure;
 
 import org.dong.scheduler.config.SchedulerProperties;
 import org.dong.scheduler.core.job.SchedulerJobs;
+import org.dong.scheduler.core.util.ThreadContextUtil;
 import org.springframework.scheduling.annotation.Scheduled;
 
 public class SchedulerJobRunner {
@@ -18,7 +19,7 @@ public class SchedulerJobRunner {
         if (!properties.isEnabled()) {
             return;
         }
-        jobs.dispatch();
+        ThreadContextUtil.addNewContext(jobs::dispatch).run();
     }
 
     @Scheduled(fixedDelayString = "${scheduler.recovery-interval-ms:30000}")
@@ -26,7 +27,7 @@ public class SchedulerJobRunner {
         if (!properties.isEnabled()) {
             return;
         }
-        jobs.recover();
+        ThreadContextUtil.addNewContext(jobs::recover).run();
     }
 
     @Scheduled(fixedDelayString = "${scheduler.queue-refill-interval-ms:15000}")
@@ -34,6 +35,6 @@ public class SchedulerJobRunner {
         if (!properties.isEnabled()) {
             return;
         }
-        jobs.refillQueue();
+        ThreadContextUtil.addNewContext(jobs::refillQueue).run();
     }
 }

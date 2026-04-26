@@ -280,7 +280,7 @@ scheduler-starter/src/main/java/org/dong/scheduler/
 
 ## 8. 代码行宽规则
 
-- Java 代码（包括日志语句）单行宽度不得超过 `120`。
+- Java 代码（包括日志语句）单行宽度需小于 `180`（即最大 `179`）。
 - 编辑器层规则见项目根目录 [`.editorconfig`](/Users/chenmingdong01/Documents/github/user-task-scheduler/.editorconfig)。
 - CI/本地可执行校验：
 
@@ -291,7 +291,7 @@ mvn -Pcode-style verify
 如果内网 Maven 仓库暂时不可用，可使用零依赖脚本：
 
 ```bash
-scripts/check_line_width.sh 120
+scripts/check_line_width.sh 179
 ```
   autoconfigure/
   config/

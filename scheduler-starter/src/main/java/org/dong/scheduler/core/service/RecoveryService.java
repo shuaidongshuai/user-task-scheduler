@@ -197,7 +197,8 @@ public class RecoveryService {
             }
             remaining -= actualReduce;
             long redisAfter = concurrencyGuard.userRunning(groupCode, userId);
-            log.warn("running counter reconciled by user (db user pass), group={}, user={}, redisBefore={}, dbTarget={}, expectedReduce={}, actualReduce={}, redisAfter={}, remainingOverflow={}",
+            log.warn("running counter reconciled by user (db user pass), group={}, user={}, redisBefore={}, "
+                            + "dbTarget={}, expectedReduce={}, actualReduce={}, redisAfter={}, remainingOverflow={}",
                     groupCode, userId, redisUser, dbUser, expectedReduce, actualReduce, redisAfter, remaining);
         }
 
@@ -221,7 +222,9 @@ public class RecoveryService {
                 }
                 remaining -= actualReduce;
                 long redisAfter = concurrencyGuard.userRunning(groupCode, userId);
-                log.warn("running counter reconciled by user (redis fallback pass), group={}, user={}, redisBefore={}, dbTarget={}, expectedReduce={}, actualReduce={}, redisAfter={}, remainingOverflow={}",
+                log.warn("running counter reconciled by user (redis fallback pass), group={}, user={}, "
+                                + "redisBefore={}, dbTarget={}, expectedReduce={}, actualReduce={}, "
+                                + "redisAfter={}, remainingOverflow={}",
                         groupCode, userId, redisUser, dbUser, expectedReduce, actualReduce, redisAfter, remaining);
             }
         }
@@ -262,8 +265,12 @@ public class RecoveryService {
             concurrencyGuard.setGroupRunning(groupCode, dbGroupRunning);
         }
         long redisGroupAfter = concurrencyGuard.groupRunning(groupCode);
-        log.warn("running counters immediately reconciled by user hint, group={}, user={}, trigger={}, dbGroupRunning={}, redisGroupBefore={}, redisGroupAfter={}, dbUserRunning={}, redisUserBefore={}, redisUserAfter={}, reducedByScript={}",
-                groupCode, userId, trigger, dbGroupRunning, redisGroupRunning, redisGroupAfter, dbUserRunning, redisUserRunning, concurrencyGuard.userRunning(groupCode, userId), reduced);
+        log.warn("running counters immediately reconciled by user hint, group={}, user={}, trigger={}, "
+                        + "dbGroupRunning={}, redisGroupBefore={}, redisGroupAfter={}, dbUserRunning={}, "
+                        + "redisUserBefore={}, redisUserAfter={}, reducedByScript={}",
+                groupCode, userId, trigger, dbGroupRunning, redisGroupRunning, redisGroupAfter,
+                dbUserRunning, redisUserRunning, concurrencyGuard.userRunning(groupCode, userId),
+                reduced);
         return true;
     }
 }
