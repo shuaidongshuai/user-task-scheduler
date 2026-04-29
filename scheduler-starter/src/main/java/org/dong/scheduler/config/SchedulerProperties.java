@@ -4,9 +4,14 @@ import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 @Data
-@ConfigurationProperties(prefix = "scheduler")
+@ConfigurationProperties(prefix = "utask.scheduler")
 public class SchedulerProperties {
     private boolean enabled = true;
+    /**
+     * Whether scheduled dispatch/recovery/refill loops should run.
+     * Keep true by default; set false to pause scheduling while preserving submit APIs.
+     */
+    private boolean dispatchEnabled = true;
     private boolean autoInitDefaultGroup = true;
     private String defaultGroupCode = "public-group";
     private int defaultGroupMaxConcurrency = 100;

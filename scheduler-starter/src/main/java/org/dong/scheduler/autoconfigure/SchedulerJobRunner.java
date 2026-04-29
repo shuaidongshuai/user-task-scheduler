@@ -14,25 +14,25 @@ public class SchedulerJobRunner {
         this.jobs = jobs;
     }
 
-    @Scheduled(fixedDelayString = "${scheduler.dispatch-interval-ms:500}")
+    @Scheduled(fixedDelayString = "${utask.scheduler.dispatch-interval-ms:500}")
     public void dispatch() {
-        if (!properties.isEnabled()) {
+        if (!properties.isDispatchEnabled()) {
             return;
         }
         ThreadContextUtil.addNewContext(jobs::dispatch).run();
     }
 
-    @Scheduled(fixedDelayString = "${scheduler.recovery-interval-ms:30000}")
+    @Scheduled(fixedDelayString = "${utask.scheduler.recovery-interval-ms:30000}")
     public void recover() {
-        if (!properties.isEnabled()) {
+        if (!properties.isDispatchEnabled()) {
             return;
         }
         ThreadContextUtil.addNewContext(jobs::recover).run();
     }
 
-    @Scheduled(fixedDelayString = "${scheduler.queue-refill-interval-ms:15000}")
+    @Scheduled(fixedDelayString = "${utask.scheduler.queue-refill-interval-ms:15000}")
     public void refillQueue() {
-        if (!properties.isEnabled()) {
+        if (!properties.isDispatchEnabled()) {
             return;
         }
         ThreadContextUtil.addNewContext(jobs::refillQueue).run();

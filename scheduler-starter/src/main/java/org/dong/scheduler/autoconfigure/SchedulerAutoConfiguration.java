@@ -37,7 +37,7 @@ import java.util.UUID;
 @AutoConfiguration
 @EnableScheduling
 @EnableConfigurationProperties(SchedulerProperties.class)
-@ConditionalOnProperty(prefix = "scheduler", name = "enabled", havingValue = "true", matchIfMissing = true)
+@ConditionalOnProperty(prefix = "utask.scheduler", name = "enabled", havingValue = "true", matchIfMissing = true)
 @ConditionalOnClass({org.springframework.jdbc.core.JdbcTemplate.class, org.springframework.data.redis.core.StringRedisTemplate.class})
 public class SchedulerAutoConfiguration {
 

@@ -142,7 +142,7 @@ def start_instance(
         "-jar",
         str(jar),
         f"--server.port={port}",
-        f"--scheduler.instance-id=local-{port}",
+        f"--utask.scheduler.instance-id=local-{port}",
     ]
 
     with log_file.open("ab") as logfp:

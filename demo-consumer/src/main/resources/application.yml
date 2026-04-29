@@ -25,16 +25,18 @@ spring:
       host: 127.0.0.1
       port: 6379
 
-scheduler:
-  enabled: true
-  dispatch-interval-ms: 500
-  recovery-interval-ms: 10000
-  queue-refill-interval-ms: 10000
-  worker-threads: 8
-  heartbeat-interval-sec: 5
-  default-retry-delay-sec: 5
-  default-execute-timeout-sec: 60
-  timeout-interrupt-grace-sec: 5
+utask:
+  scheduler:
+    enabled: true
+    dispatch-enabled: false
+    dispatch-interval-ms: 500
+    recovery-interval-ms: 10000
+    queue-refill-interval-ms: 10000
+    worker-threads: 8
+    heartbeat-interval-sec: 5
+    default-retry-delay-sec: 5
+    default-execute-timeout-sec: 60
+    timeout-interrupt-grace-sec: 5
 
 logging:
   pattern:

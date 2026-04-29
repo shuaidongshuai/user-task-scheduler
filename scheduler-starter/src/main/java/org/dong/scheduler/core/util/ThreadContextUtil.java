@@ -28,6 +28,13 @@ public final class ThreadContextUtil {
     }
 
     /**
+     * 执行 runnable，复用当前 MDC 中的 traceId，不存在时生成新 UUID。
+     */
+    public static void runFunc(Runnable runnable) {
+        runFunc(runnable, getOrCreate());
+    }
+
+    /**
      * 执行 callable，并设置指定的 traceId。
      */
     public static <T> T callFunc(Callable<T> callable, String traceId) throws Exception {
@@ -38,13 +45,6 @@ public final class ThreadContextUtil {
         } finally {
             restore(previous);
         }
-    }
-
-    /**
-     * 执行 runnable，复用当前 MDC 中的 traceId，不存在时生成新 UUID。
-     */
-    public static void runFunc(Runnable runnable) {
-        runFunc(runnable, getOrCreate());
     }
 
     /**

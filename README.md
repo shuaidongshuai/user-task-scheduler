@@ -78,30 +78,33 @@ sequenceDiagram
 ### 4.3 基础配置
 
 ```yaml
-scheduler:
-  enabled: true
-  auto-init-default-group: true
-  default-group-code: public-group
-  default-group-max-concurrency: 100
-  default-group-user-base-concurrency: 4
-  default-group-dispatch-batch-size: 100
-  default-group-heartbeat-timeout-sec: 90
-  default-group-lock-expire-sec: 120
-  dispatch-interval-ms: 500
-  recovery-interval-ms: 30000
-  queue-refill-interval-ms: 15000
-  worker-threads: 16
-  heartbeat-interval-sec: 10
-  default-retry-delay-sec: 15
-  default-execute-timeout-sec: 600
-  # instance-id: your-instance-id
+utask:
+  scheduler:
+    enabled: true
+    dispatch-enabled: true
+    auto-init-default-group: true
+    default-group-code: public-group
+    default-group-max-concurrency: 100
+    default-group-user-base-concurrency: 4
+    default-group-dispatch-batch-size: 100
+    default-group-heartbeat-timeout-sec: 90
+    default-group-lock-expire-sec: 120
+    dispatch-interval-ms: 500
+    recovery-interval-ms: 30000
+    queue-refill-interval-ms: 15000
+    worker-threads: 16
+    heartbeat-interval-sec: 10
+    default-retry-delay-sec: 15
+    default-execute-timeout-sec: 600
+    # instance-id: your-instance-id
 ```
 
 `group` 配置来自 DB 表 `scheduler_group_config`。当 `auto-init-default-group=true` 时，框架会在启动时幂等插入默认公共 group（只在不存在时插入，不覆盖已有配置）。
 
 字段说明：
 
-- `enabled`：是否启用调度器（`false` 时不执行 dispatch/recover/refill）。推荐默认：`true`
+- `enabled`：是否加载调度框架自动配置（`false` 时不注册 `SchedulerClient`/调度相关 Bean）。推荐默认：`true`
+- `dispatch-enabled`：是否执行 dispatch/recover/refill 调度循环（`false` 时暂停调度，但可保留任务提交能力）。推荐默认：`true`
 - `auto-init-default-group`：启动时自动确保默认公共 group 存在。推荐默认：`true`
 - `default-group-code`：默认公共 group 编码；提交任务未传 `groupCode` 时会使用该值。推荐默认：`public-group`
 - `default-group-max-concurrency`：默认公共 group 的全局最大并发。推荐默认：`100`
