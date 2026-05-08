@@ -33,6 +33,7 @@ public class DispatchService {
     private final WorkerService workerService;
     private final RecoveryService recoveryService;
     private final BusinessTaskStateProviderRegistry businessTaskStateProviderRegistry;
+    private final TaskStateService taskStateService;
     private final ConcurrentHashMap<String, AtomicInteger> groupSummaryLogCounter = new ConcurrentHashMap<>();
 
     public DispatchService(SchedulerProperties properties,
@@ -43,7 +44,8 @@ public class DispatchService {
                            DynamicUserLimitService dynamicUserLimitService,
                            WorkerService workerService,
                            RecoveryService recoveryService,
-                           BusinessTaskStateProviderRegistry businessTaskStateProviderRegistry) {
+                           BusinessTaskStateProviderRegistry businessTaskStateProviderRegistry,
+                           TaskStateService taskStateService) {
         this.properties = properties;
         this.groupConfigRepository = groupConfigRepository;
         this.taskRepository = taskRepository;
@@ -53,6 +55,7 @@ public class DispatchService {
         this.workerService = workerService;
         this.recoveryService = recoveryService;
         this.businessTaskStateProviderRegistry = businessTaskStateProviderRegistry;
+        this.taskStateService = taskStateService;
     }
 
     public void dispatchOnce() {
@@ -126,7 +129,7 @@ public class DispatchService {
             if (stateProvider != null) {
                 BusinessTaskState state = stateProvider.query(task);
                 if (state == BusinessTaskState.SUCCESS) {
-                    taskRepository.markTerminalByBusinessState(task.getId(), TaskStatus.SUCCESS, now);
+                    taskStateService.markTerminalByBusinessState(task.getId(), TaskStatus.SUCCESS, now);
                     queueRedisService.removeFromReady(cfg.getGroupCode(), taskId);
                     skipped++;
                     log.info("dispatch short-circuit success by biz state, taskId={}, taskNo={}, group={}",
@@ -134,7 +137,7 @@ public class DispatchService {
                     continue;
                 }
                 if (state == BusinessTaskState.FAILED) {
-                    taskRepository.markTerminalByBusinessState(task.getId(), TaskStatus.FAILED, now);
+                    taskStateService.markTerminalByBusinessState(task.getId(), TaskStatus.FAILED, now);
                     queueRedisService.removeFromReady(cfg.getGroupCode(), taskId);
                     skipped++;
                     log.info("dispatch short-circuit failed by biz state, taskId={}, taskNo={}, group={}",

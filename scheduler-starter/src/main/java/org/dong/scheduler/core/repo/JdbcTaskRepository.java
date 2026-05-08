@@ -106,6 +106,15 @@ public class JdbcTaskRepository implements TaskRepository {
     }
 
     @Override
+    public boolean markFailedPendingByDependency(Long id, String errorCode, String errorMsg, LocalDateTime now) {
+        return jdbcTemplate.update("""
+                update scheduler_task
+                   set status='FAILED', finish_time=?, error_code=?, error_msg=?, update_time=now(), version=version+1
+                 where id=? and status='PENDING'
+                """, Timestamp.valueOf(now), errorCode, errorMsg, id) > 0;
+    }
+
+    @Override
     public boolean markWaitRetry(Long id, LocalDateTime nextRetryAt, String errorCode, String errorMsg, LocalDateTime now) {
         return jdbcTemplate.update("""
                 update scheduler_task
@@ -179,7 +188,13 @@ public class JdbcTaskRepository implements TaskRepository {
                  where id in (
                     select id from (
                         select id from scheduler_task
-                         where status='PENDING' and execute_at <= ?
+                         where status='PENDING'
+                           and execute_at <= ?
+                           and not exists (
+                               select 1 from scheduler_task_dependency d
+                                where d.task_id = scheduler_task.id
+                                  and d.status in ('WAITING', 'IMPOSSIBLE')
+                           )
                          order by execute_at asc
                          limit ?
                     ) t
@@ -193,16 +208,21 @@ public class JdbcTaskRepository implements TaskRepository {
                 update scheduler_task
                    set status='RUNNABLE', update_time=now(), version=version+1
                  where id=? and status='PENDING' and execute_at <= ?
+                   and not exists (
+                       select 1 from scheduler_task_dependency d
+                        where d.task_id = scheduler_task.id
+                          and d.status in ('WAITING', 'IMPOSSIBLE')
+                   )
                 """, id, Timestamp.valueOf(now)) > 0;
     }
 
     @Override
-    public void markTerminalByBusinessState(Long id, TaskStatus status, LocalDateTime now) {
-        jdbcTemplate.update("""
+    public boolean markTerminalByBusinessState(Long id, TaskStatus status, LocalDateTime now) {
+        return jdbcTemplate.update("""
                 update scheduler_task
                    set status=?, finish_time=?, update_time=now(), version=version+1
                  where id=? and status in ('RUNNABLE','WAIT_RETRY','RUNNING','PENDING')
-                """, status.name(), Timestamp.valueOf(now), id);
+                """, status.name(), Timestamp.valueOf(now), id) > 0;
     }
 
     @Override

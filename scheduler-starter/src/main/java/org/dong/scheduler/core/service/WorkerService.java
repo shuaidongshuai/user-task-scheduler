@@ -43,6 +43,7 @@ public class WorkerService {
     private final ScheduledExecutorService heartbeatExecutor;
     private final ExecutorService invokeExecutor;
     private final BusinessTaskStateProviderRegistry businessTaskStateProviderRegistry;
+    private final TaskStateService taskStateService;
 
     public WorkerService(SchedulerProperties properties,
                          TaskRepository taskRepository,
@@ -51,7 +52,8 @@ public class WorkerService {
                          QueueRedisService queueRedisService,
                          RecoveryService recoveryService,
                          ThreadPoolTaskExecutor workerExecutor,
-                         BusinessTaskStateProviderRegistry businessTaskStateProviderRegistry) {
+                         BusinessTaskStateProviderRegistry businessTaskStateProviderRegistry,
+                         TaskStateService taskStateService) {
         this.properties = properties;
         this.taskRepository = taskRepository;
         this.handlerRegistry = handlerRegistry;
@@ -60,6 +62,7 @@ public class WorkerService {
         this.recoveryService = recoveryService;
         this.workerExecutor = workerExecutor;
         this.businessTaskStateProviderRegistry = businessTaskStateProviderRegistry;
+        this.taskStateService = taskStateService;
         this.heartbeatExecutor = new ScheduledThreadPoolExecutor(Math.max(2, properties.getWorkerThreads() / 4));
         int invokeThreads = Math.max(2, properties.getWorkerThreads());
         BlockingQueue<Runnable> invokeQueue = new LinkedBlockingQueue<>(invokeThreads * 4);
@@ -115,14 +118,14 @@ public class WorkerService {
             if (stateProvider != null) {
                 BusinessTaskState state = stateProvider.query(task);
                 if (state == BusinessTaskState.SUCCESS) {
-                    taskRepository.markSuccess(task.getId(), LocalDateTime.now());
+                    taskStateService.markSuccess(task.getId(), LocalDateTime.now());
                     finalStatus = TaskStatus.SUCCESS;
                     log.info("worker short-circuit success by biz state, taskId={}, taskNo={}, executeNo={}",
                             task.getId(), task.getTaskNo(), executeNo);
                     return;
                 }
                 if (state == BusinessTaskState.FAILED) {
-                    taskRepository.markFailed(task.getId(), "BIZ_FAILED", "business state already failed", LocalDateTime.now());
+                    taskStateService.markFailed(task.getId(), "BIZ_FAILED", "business state already failed", LocalDateTime.now());
                     finalStatus = TaskStatus.FAILED;
                     log.info("worker short-circuit failed by biz state, taskId={}, taskNo={}, executeNo={}",
                             task.getId(), task.getTaskNo(), executeNo);
@@ -160,7 +163,7 @@ public class WorkerService {
                 persistTaskExtInfo(task);
             }
             if (result.isSuccess()) {
-                taskRepository.markSuccess(task.getId(), LocalDateTime.now());
+                taskStateService.markSuccess(task.getId(), LocalDateTime.now());
                 finalStatus = TaskStatus.SUCCESS;
                 log.info("task execute success, taskId={}, taskNo={}, executeNo={}",
                         task.getId(), task.getTaskNo(), executeNo);
@@ -176,7 +179,7 @@ public class WorkerService {
                                     + "taskId={}, taskNo={}, executeNo={}, nextRetryAt={}, retryCount={}/{}",
                             task.getId(), task.getTaskNo(), executeNo, nextRetry, task.getRetryCount() + 1, task.getMaxRetryCount());
                 } else {
-                    taskRepository.markFailed(task.getId(), errorCode, errorMsg, LocalDateTime.now());
+                    taskStateService.markFailed(task.getId(), errorCode, errorMsg, LocalDateTime.now());
                     finalStatus = TaskStatus.FAILED;
                     log.error("task timeout uninterruptible, retry exhausted -> FAILED, taskId={}, taskNo={}, executeNo={}, retryCount={}/{}",
                             task.getId(), task.getTaskNo(), executeNo, task.getRetryCount(), task.getMaxRetryCount());
@@ -192,7 +195,7 @@ public class WorkerService {
                                 + "nextRetryAt={}, retryCount={}/{}",
                         task.getId(), task.getTaskNo(), executeNo, errorCode, nextRetry, task.getRetryCount() + 1, task.getMaxRetryCount());
             } else {
-                taskRepository.markFailed(task.getId(), result.getErrorCode(), result.getErrorMsg(), LocalDateTime.now());
+                taskStateService.markFailed(task.getId(), result.getErrorCode(), result.getErrorMsg(), LocalDateTime.now());
                 finalStatus = TaskStatus.FAILED;
                 errorCode = result.getErrorCode();
                 errorMsg = result.getErrorMsg();
@@ -209,7 +212,7 @@ public class WorkerService {
                 taskRepository.findById(task.getId()).ifPresent(queueRedisService::enqueue);
                 finalStatus = TaskStatus.WAIT_RETRY;
             } else {
-                taskRepository.markFailed(task.getId(), errorCode, errorMsg, LocalDateTime.now());
+                taskStateService.markFailed(task.getId(), errorCode, errorMsg, LocalDateTime.now());
                 finalStatus = TaskStatus.FAILED;
             }
         } finally {

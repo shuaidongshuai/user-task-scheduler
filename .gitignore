@@ -37,3 +37,12 @@ build/
 ### Mac OS ###
 .DS_Store
 /logs/
+/.obsidian/app.json
+/utask-scheduler/.obsidian/app.json
+/.obsidian/appearance.json
+/utask-scheduler/.obsidian/appearance.json
+/.obsidian/core-plugins.json
+/utask-scheduler/.obsidian/core-plugins.json
+/utask-scheduler/.obsidian/graph.json
+/.obsidian/workspace.json
+/utask-scheduler/.obsidian/workspace.json

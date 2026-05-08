@@ -22,6 +22,8 @@ public interface TaskRepository {
 
     boolean markFailed(Long id, String errorCode, String errorMsg, LocalDateTime now);
 
+    boolean markFailedPendingByDependency(Long id, String errorCode, String errorMsg, LocalDateTime now);
+
     boolean markWaitRetry(Long id, LocalDateTime nextRetryAt, String errorCode, String errorMsg, LocalDateTime now);
 
     boolean rescheduleToRunnable(Long id, LocalDateTime nextExecuteAt, String errorCode, String errorMsg, LocalDateTime now);
@@ -40,7 +42,7 @@ public interface TaskRepository {
 
     boolean markRunnableIfPending(Long id, LocalDateTime now);
 
-    void markTerminalByBusinessState(Long id, TaskStatus status, LocalDateTime now);
+    boolean markTerminalByBusinessState(Long id, TaskStatus status, LocalDateTime now);
 
     void insertExecutionStart(SchedulerTask task, String executeNo, String dispatcherInstance, String workerInstance, LocalDateTime now);
 

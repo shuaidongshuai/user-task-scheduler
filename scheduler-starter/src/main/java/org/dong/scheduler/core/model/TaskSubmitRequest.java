@@ -6,6 +6,7 @@ import lombok.NoArgsConstructor;
 import lombok.experimental.Accessors;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 /**
  * 任务提交参数。
@@ -62,4 +63,8 @@ public class TaskSubmitRequest {
      * 扩展信息（字符串），可选。
      */
     private String extInfo;
+    /**
+     * 依赖任务列表；只有所有依赖都满足各自目标状态后当前任务才可执行。
+     */
+    private List<TaskDependencyRequest> dependencies;
 }

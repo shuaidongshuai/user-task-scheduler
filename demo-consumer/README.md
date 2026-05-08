@@ -83,6 +83,36 @@ curl -X POST 'http://127.0.0.1:8088/demo/submit' \
 - `bizKey` 允许重复提交；调度内部唯一键是 `task_no`，业务幂等由业务侧控制（demo 中 `bizType` 固定为 `demo.biz.process`）
 - `extInfo` 为可选字符串扩展信息，任务重试时可使用上轮执行写回的最新值
 
+带依赖的提交示例：
+
+```bash
+curl -X POST 'http://127.0.0.1:8088/demo/submit' \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "userId":"u1",
+    "bizKey":"order-2001",
+    "priority":80,
+    "dependencies":[
+      {
+        "taskId":101,
+        "targetState":"SUCCESS"
+      },
+      {
+        "taskId":102,
+        "targetState":"TERMINAL"
+      }
+    ],
+    "payload":"hello"
+  }'
+```
+
+多层依赖联调建议：
+
+1. 先提交任务 `A`，记录返回的 `taskId`
+2. 再提交任务 `B`，让 `dependencies=[{taskId:A, targetState:SUCCESS}]`
+3. 再提交任务 `C`，让 `dependencies=[{taskId:B, targetState:SUCCESS}]`
+4. 观察 `A -> B -> C` 是否按终态逐层推进
+
 2. 查询业务状态：
 
 ```bash

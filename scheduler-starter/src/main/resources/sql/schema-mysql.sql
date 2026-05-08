@@ -1,4 +1,5 @@
 DROP TABLE IF EXISTS scheduler_task_execution;
+DROP TABLE IF EXISTS scheduler_task_dependency;
 DROP TABLE IF EXISTS scheduler_group_config;
 DROP TABLE IF EXISTS scheduler_task;
 
@@ -45,6 +46,20 @@ CREATE TABLE IF NOT EXISTS scheduler_task (
     INDEX idx_heartbeat (status, heartbeat_time),
     INDEX idx_biz_type_biz_key (biz_type, biz_key)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='调度任务主表';
+
+CREATE TABLE IF NOT EXISTS scheduler_task_dependency (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键ID',
+    task_id BIGINT NOT NULL COMMENT '当前任务ID',
+    depends_on_task_id BIGINT NOT NULL COMMENT '依赖的上游任务ID',
+    target_state VARCHAR(32) NOT NULL COMMENT '期望上游状态：SUCCESS/FAILED/TERMINAL',
+    status VARCHAR(32) NOT NULL COMMENT '依赖状态：WAITING/SATISFIED/IMPOSSIBLE',
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+
+    UNIQUE KEY uk_task_dependency (task_id, depends_on_task_id),
+    INDEX idx_depends_on_status (depends_on_task_id, status),
+    INDEX idx_task_status (task_id, status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='任务依赖关系表';
 
 CREATE TABLE IF NOT EXISTS scheduler_group_config (
     id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键ID',

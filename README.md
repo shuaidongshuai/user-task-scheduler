@@ -6,6 +6,7 @@
 - group 最大并发
 - user 并发（支持动态扩缩容）
 - 优先级调度（高优先级先执行）
+- 支持有向无环图的多任务运行
 - DB 状态机 + Redis 调度加速
 - 宕机恢复（心跳超时自动回收重试）
 - 可选业务状态查询接口（业务已完成/失败则不重复执行）
@@ -16,6 +17,7 @@
 - DB 是最终真相：任务状态、执行记录都在 MySQL
 - Redis 是协作层：time/ready 双队列 + 并发计数 + lease
 - 调度两阶段：先 `time`，后 `ready`
+- 支持任务依赖：当前任务可等待多个上游任务分别达到 `SUCCESS`、`FAILED` 或 `TERMINAL`
 - 至少一次语义：调度内部唯一键是 `task_no`，业务幂等由业务侧自行保证
 
 ## 2. 两阶段调度（保障吞吐 + 优先级）
@@ -161,6 +163,7 @@ public void submitDemo() {
             .setUserId("user-1001")
             .setBizType("image.render")
             .setBizKey("biz-key-001")
+            // dependencies 可选；只有所有依赖都满足后任务才会执行
             .setPriority(90)
             .setRetryDelaySec(20)
             .setExtInfo("{\"prompt\":\"hello\"}");
@@ -173,12 +176,49 @@ public void submitDemo() {
 
 - `bizKey`：必填，可重复；是否幂等由业务侧控制
 - `groupCode`：可选；为空时自动回退到 `scheduler.default-group-code`
+- `dependencies`：可选依赖列表；只有所有依赖满足后当前任务才会执行
 - `extInfo`：可选字符串，会透传给 `TaskHandler`；若执行结果返回新的 `extInfo`，调度器会写回 DB，后续重试拿到最新值
 - `retryDelaySec`：单任务重试间隔（秒），可选
 - 若未设置，则回退到全局配置 `scheduler.default-retry-delay-sec`
 - 该参数会影响失败重试、业务状态延后重检、恢复补偿后的下次执行时间
 
-### 5.2 `ext_info` 中间结果传递（多阶段任务）
+### 5.2 任务依赖
+
+每个任务可以声明多个依赖项；只有当所有依赖项都满足时，当前任务才会进入执行。
+
+依赖项结构：
+
+- `taskId`：依赖的上游任务 ID
+- `targetState`：期望上游达到的状态
+
+`targetState` 支持：
+
+- `SUCCESS`：上游任务成功后当前任务才可执行
+- `FAILED`：上游任务失败后当前任务才可执行
+- `TERMINAL`：上游任务成功或失败后当前任务都可执行
+
+示例：
+
+```java
+TaskSubmitRequest req = new TaskSubmitRequest()
+        .setGroupCode("image-render")
+        .setUserId("user-1001")
+        .setBizType("image.render")
+        .setBizKey("biz-key-c")
+        .setDependencies(List.of(
+                new TaskDependencyRequest().setTaskId(101L).setTargetState(DependencyTargetState.SUCCESS),
+                new TaskDependencyRequest().setTaskId(102L).setTargetState(DependencyTargetState.FAILED)
+        ));
+```
+
+说明：
+
+- 支持一个任务依赖多个上游任务
+- 支持多层依赖，例如 `A -> B -> C`
+- 若某个依赖项已确定无法满足，当前任务会直接失败
+- 若同时设置了 `executeAt`，则任务需要在“依赖满足”和“到达执行时间”两个条件都成立后才会执行
+
+### 5.3 `ext_info` 中间结果传递（多阶段任务）
 
 - 提交任务时可写入初始 `extInfo`（字符串）
 - `TaskHandler` 执行后可在 `TaskExecuteResult` 中返回新的 `extInfo`
@@ -187,7 +227,7 @@ public void submitDemo() {
 
 这使得任务可以在多次执行中逐步推进，并保存每一阶段的中间结果。
 
-### 5.3 注册任务执行器（必须）
+### 5.4 注册任务执行器（必须）
 
 ```java
 @Component
@@ -219,7 +259,7 @@ public class ImageRenderHandler implements TaskHandler {
 - 普通超时（可中断）会按重试策略处理
 - 若判定为 `TASK_TIMEOUT_UNINTERRUPTIBLE`，会继续按重试策略重派（直到达到 `maxRetryCount`）；该场景可能出现“旧执行线程尚未退出 + 新重试已开始”，必须由业务幂等兜底
 
-### 5.4 业务状态查询接口（可选）
+### 5.5 业务状态查询接口（可选）
 
 如你有业务表状态，希望“已完成/已失败不再重复调度”，实现：
 
@@ -280,6 +320,17 @@ public class BizStateProvider implements BusinessTaskStateProvider {
 
 ```text
 scheduler-starter/src/main/java/org/dong/scheduler/
+  autoconfigure/
+  config/
+  core/
+    enums/
+    job/
+    model/
+    redis/
+    repo/
+    service/
+    spi/
+```
 
 ## 8. 代码行宽规则
 
@@ -295,17 +346,6 @@ mvn -Pcode-style verify
 
 ```bash
 scripts/check_line_width.sh 179
-```
-  autoconfigure/
-  config/
-  core/
-    enums/
-    job/
-    model/
-    redis/
-    repo/
-    service/
-    spi/
 ```
 
 ## 8. 说明

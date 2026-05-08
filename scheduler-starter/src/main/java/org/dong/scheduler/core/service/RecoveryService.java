@@ -19,15 +19,18 @@ public class RecoveryService {
     private final TaskRepository taskRepository;
     private final ConcurrencyGuard concurrencyGuard;
     private final QueueRedisService queueRedisService;
+    private final TaskStateService taskStateService;
 
     public RecoveryService(SchedulerProperties properties,
                            TaskRepository taskRepository,
                            ConcurrencyGuard concurrencyGuard,
-                           QueueRedisService queueRedisService) {
+                           QueueRedisService queueRedisService,
+                           TaskStateService taskStateService) {
         this.properties = properties;
         this.taskRepository = taskRepository;
         this.concurrencyGuard = concurrencyGuard;
         this.queueRedisService = queueRedisService;
+        this.taskStateService = taskStateService;
     }
 
     public int recoverTimeoutRunning(String groupCode, int heartbeatTimeoutSec) {
@@ -65,7 +68,12 @@ public class RecoveryService {
                         recovered++;
                     }
                 } else {
-                    boolean ok = taskRepository.markFailed(task.getId(), "HEARTBEAT_TIMEOUT", "heartbeat timeout recovered", LocalDateTime.now());
+                    boolean ok = taskStateService.markFailed(
+                            task.getId(),
+                            "HEARTBEAT_TIMEOUT",
+                            "heartbeat timeout recovered",
+                            LocalDateTime.now()
+                    );
                     if (ok) {
                         concurrencyGuard.repairRelease(task.getGroupCode(), task.getUserId());
                         log.error("recovery marked task FAILED after timeout, taskId={}, taskNo={}, group={}, user={}, bizType={}, bizKey={}, retryCount={}/{}",

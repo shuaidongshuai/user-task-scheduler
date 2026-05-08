@@ -39,6 +39,8 @@ class WorkerServiceReleaseMismatchTest {
     private RecoveryService recoveryService;
     @Mock
     private TaskHandler taskHandler;
+    @Mock
+    private TaskStateService taskStateService;
 
     private ThreadPoolTaskExecutor workerExecutor;
     private WorkerService workerService;
@@ -69,7 +71,7 @@ class WorkerServiceReleaseMismatchTest {
 
         when(taskHandler.bizTypes()).thenReturn(List.of("demo.biz"));
         when(taskHandler.execute(any(SchedulerTask.class))).thenReturn(TaskExecuteResult.success());
-        when(taskRepository.markSuccess(anyLong(), any(LocalDateTime.class))).thenReturn(true);
+        when(taskStateService.markSuccess(anyLong(), any(LocalDateTime.class))).thenReturn(true);
         when(concurrencyGuard.release("g1", "u1", 1L, "exec-old")).thenReturn(false);
         when(concurrencyGuard.leaseValue(1L)).thenReturn("exec-new");
 
@@ -83,7 +85,8 @@ class WorkerServiceReleaseMismatchTest {
                 queueRedisService,
                 recoveryService,
                 workerExecutor,
-                stateProviderRegistry
+                stateProviderRegistry,
+                taskStateService
         );
 
         SchedulerTask task = new SchedulerTask();

@@ -8,14 +8,19 @@ import org.dong.scheduler.core.redis.QueueRedisService;
 import org.dong.scheduler.core.redis.RedisConcurrencyGuard;
 import org.dong.scheduler.core.repo.GroupConfigRepository;
 import org.dong.scheduler.core.repo.JdbcGroupConfigRepository;
+import org.dong.scheduler.core.repo.JdbcTaskDependencyRepository;
 import org.dong.scheduler.core.repo.JdbcTaskRepository;
+import org.dong.scheduler.core.repo.TaskDependencyRepository;
 import org.dong.scheduler.core.repo.TaskRepository;
 import org.dong.scheduler.core.service.BusinessTaskStateProviderRegistry;
+import org.dong.scheduler.core.service.DefaultTaskDependencyService;
 import org.dong.scheduler.core.service.DefaultSchedulerClient;
 import org.dong.scheduler.core.service.DispatchService;
 import org.dong.scheduler.core.service.DynamicUserLimitService;
 import org.dong.scheduler.core.service.RecoveryService;
+import org.dong.scheduler.core.service.TaskDependencyService;
 import org.dong.scheduler.core.service.TaskHandlerRegistry;
+import org.dong.scheduler.core.service.TaskStateService;
 import org.dong.scheduler.core.service.WorkerService;
 import org.dong.scheduler.core.spi.BusinessTaskStateProvider;
 import org.dong.scheduler.core.spi.SchedulerClient;
@@ -30,6 +35,8 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.net.InetAddress;
 import java.util.UUID;
@@ -45,6 +52,12 @@ public class SchedulerAutoConfiguration {
     @ConditionalOnMissingBean
     public TaskRepository taskRepository(org.springframework.jdbc.core.JdbcTemplate jdbcTemplate) {
         return new JdbcTaskRepository(jdbcTemplate);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public TaskDependencyRepository taskDependencyRepository(org.springframework.jdbc.core.JdbcTemplate jdbcTemplate) {
+        return new JdbcTaskDependencyRepository(jdbcTemplate);
     }
 
     @Bean
@@ -69,6 +82,12 @@ public class SchedulerAutoConfiguration {
     @ConditionalOnMissingBean
     public DynamicUserLimitService dynamicUserLimitService(ObjectMapper objectMapper) {
         return new DynamicUserLimitService(objectMapper);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public TransactionTemplate transactionTemplate(PlatformTransactionManager transactionManager) {
+        return new TransactionTemplate(transactionManager);
     }
 
     @Bean
@@ -98,6 +117,22 @@ public class SchedulerAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
+    public TaskDependencyService taskDependencyService(TaskRepository taskRepository,
+                                                       TaskDependencyRepository taskDependencyRepository) {
+        return new DefaultTaskDependencyService(taskRepository, taskDependencyRepository);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public TaskStateService taskStateService(TaskRepository taskRepository,
+                                             TaskDependencyService taskDependencyService,
+                                             QueueRedisService queueRedisService,
+                                             TransactionTemplate transactionTemplate) {
+        return new TaskStateService(taskRepository, taskDependencyService, queueRedisService, transactionTemplate);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
     public WorkerService workerService(SchedulerProperties properties,
                                        TaskRepository taskRepository,
                                        TaskHandlerRegistry handlerRegistry,
@@ -105,10 +140,11 @@ public class SchedulerAutoConfiguration {
                                        ConcurrencyGuard concurrencyGuard,
                                        QueueRedisService queueRedisService,
                                        RecoveryService recoveryService,
+                                       TaskStateService taskStateService,
                                        @Qualifier("schedulerWorkerExecutor") ThreadPoolTaskExecutor schedulerWorkerExecutor) {
         ensureInstanceId(properties);
         return new WorkerService(properties, taskRepository, handlerRegistry, concurrencyGuard,
-                queueRedisService, recoveryService, schedulerWorkerExecutor, businessTaskStateProviderRegistry);
+                queueRedisService, recoveryService, schedulerWorkerExecutor, businessTaskStateProviderRegistry, taskStateService);
     }
 
     @Bean
@@ -121,10 +157,12 @@ public class SchedulerAutoConfiguration {
                                            DynamicUserLimitService dynamicUserLimitService,
                                            WorkerService workerService,
                                            RecoveryService recoveryService,
-                                           BusinessTaskStateProviderRegistry businessTaskStateProviderRegistry) {
+                                           BusinessTaskStateProviderRegistry businessTaskStateProviderRegistry,
+                                           TaskStateService taskStateService) {
         ensureInstanceId(properties);
         return new DispatchService(properties, groupConfigRepository, taskRepository, queueRedisService,
-                concurrencyGuard, dynamicUserLimitService, workerService, recoveryService, businessTaskStateProviderRegistry);
+                concurrencyGuard, dynamicUserLimitService, workerService, recoveryService,
+                businessTaskStateProviderRegistry, taskStateService);
     }
 
     @Bean
@@ -132,8 +170,9 @@ public class SchedulerAutoConfiguration {
     public RecoveryService recoveryService(SchedulerProperties properties,
                                            TaskRepository taskRepository,
                                            ConcurrencyGuard concurrencyGuard,
-                                           QueueRedisService queueRedisService) {
-        return new RecoveryService(properties, taskRepository, concurrencyGuard, queueRedisService);
+                                           QueueRedisService queueRedisService,
+                                           TaskStateService taskStateService) {
+        return new RecoveryService(properties, taskRepository, concurrencyGuard, queueRedisService, taskStateService);
     }
 
     @Bean
@@ -154,8 +193,9 @@ public class SchedulerAutoConfiguration {
     @ConditionalOnMissingBean
     public SchedulerClient schedulerClient(TaskRepository taskRepository,
                                            QueueRedisService queueRedisService,
-                                           SchedulerProperties properties) {
-        return new DefaultSchedulerClient(taskRepository, queueRedisService, properties);
+                                           SchedulerProperties properties,
+                                           TaskStateService taskStateService) {
+        return new DefaultSchedulerClient(taskRepository, queueRedisService, properties, taskStateService);
     }
 
     @Bean

@@ -2,11 +2,13 @@ package org.dong.demo.controller;
 
 import org.dong.demo.domain.DemoBizTask;
 import org.dong.demo.repo.DemoBizTaskRepository;
+import org.dong.scheduler.core.model.TaskDependencyRequest;
 import org.dong.scheduler.core.model.TaskSubmitRequest;
 import org.dong.scheduler.core.spi.SchedulerClient;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -40,6 +42,7 @@ public class DemoController {
                 .setMaxRetryCount(request.maxRetryCount())
                 .setExecuteTimeoutSec(request.executeTimeoutSec() == null ? 1 : request.executeTimeoutSec())
                 .setRetryDelaySec(request.retryDelaySec())
+                .setDependencies(request.dependencies())
                 .setExtInfo(request.extInfo() == null || request.extInfo().isBlank()
                         ? (request.forceRetry() != null && request.forceRetry() ? "{\"force_retry\":true}" : null)
                         : request.extInfo());
@@ -68,6 +71,7 @@ public class DemoController {
             Integer executeTimeoutSec,
             Integer retryDelaySec,
             LocalDateTime executeAt,
+            List<TaskDependencyRequest> dependencies,
             String extInfo,
             String payload,
             Boolean forceRetry

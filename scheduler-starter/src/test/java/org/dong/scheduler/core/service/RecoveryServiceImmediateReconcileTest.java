@@ -28,6 +28,8 @@ class RecoveryServiceImmediateReconcileTest {
     private ConcurrencyGuard concurrencyGuard;
     @Mock
     private QueueRedisService queueRedisService;
+    @Mock
+    private TaskStateService taskStateService;
 
     private RecoveryService recoveryService;
 
@@ -37,7 +39,7 @@ class RecoveryServiceImmediateReconcileTest {
         properties.setInstanceId("ins-test");
         properties.setReconcileLockSec(30);
         properties.setImmediateReconcileThrottleSec(3);
-        recoveryService = new RecoveryService(properties, taskRepository, concurrencyGuard, queueRedisService);
+        recoveryService = new RecoveryService(properties, taskRepository, concurrencyGuard, queueRedisService, taskStateService);
     }
 
     @Test
