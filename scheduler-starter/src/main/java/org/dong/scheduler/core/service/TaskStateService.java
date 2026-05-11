@@ -44,9 +44,9 @@ public class TaskStateService {
             throw new IllegalStateException("submit transaction returned null");
         }
         if (result.queueTask != null) {
-            queueRedisService.enqueue(result.queueTask);
+            routeTaskToQueue(result.queueTask);
         } else if (result.task.getStatus() == TaskStatus.RUNNABLE) {
-            queueRedisService.enqueue(result.task);
+            routeTaskToQueue(result.task);
         }
         return result.taskId;
     }
@@ -109,9 +109,18 @@ public class TaskStateService {
     private void enqueueTasks(List<SchedulerTask> tasks) {
         for (SchedulerTask task : tasks) {
             if (task != null) {
-                queueRedisService.enqueue(task);
+                routeTaskToQueue(task);
             }
         }
+    }
+
+    private void routeTaskToQueue(SchedulerTask task) {
+        LocalDateTime now = LocalDateTime.now();
+        if (task.runnableStatus() && task.due(now)) {
+            queueRedisService.addToReady(task);
+            return;
+        }
+        queueRedisService.enqueue(task);
     }
 
     @FunctionalInterface

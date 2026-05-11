@@ -40,9 +40,11 @@ public class DefaultSchedulerClient implements SchedulerClient {
     public long submit(TaskSubmitRequest request) {
         TaskSubmitRequest normalized = normalize(request);
         String taskNo = "t-" + UUID.randomUUID().toString().replace("-", "");
-        log.info("submit task request accepted, taskNo={}, group={}, user={}, bizType={}, priority={}, executeAt={}, maxRetry={}",
+        log.info("submit task request accepted, taskNo={}, group={}, user={}, bizType={}, priority={}, executeAt={}," +
+                " maxRetry={}, dependencyTaskIds={}",
                 taskNo, normalized.getGroupCode(), normalized.getUserId(), normalized.getBizType(),
-                normalized.getPriority(), normalized.getExecuteAt(), normalized.getMaxRetryCount());
+                normalized.getPriority(), normalized.getExecuteAt(), normalized.getMaxRetryCount(),
+                dependencyTaskIds(normalized));
         long id = taskStateService.submit(taskNo, normalized);
         SchedulerTask task = taskRepository.findById(id)
                 .orElseThrow(() -> new IllegalStateException("task not found after submit: " + id));
@@ -116,5 +118,15 @@ public class DefaultSchedulerClient implements SchedulerClient {
             }
         }
         request.setDependencies(dependencies);
+    }
+
+    private List<Long> dependencyTaskIds(TaskSubmitRequest request) {
+        if (request.getDependencies() == null || request.getDependencies().isEmpty()) {
+            return List.of();
+        }
+        return request.getDependencies().stream()
+                .map(TaskDependencyRequest::getTaskId)
+                .filter(Objects::nonNull)
+                .toList();
     }
 }

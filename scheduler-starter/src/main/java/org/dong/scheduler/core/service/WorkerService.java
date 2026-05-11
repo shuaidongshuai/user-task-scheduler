@@ -191,7 +191,7 @@ public class WorkerService {
                 finalStatus = TaskStatus.WAIT_RETRY;
                 errorCode = result.getErrorCode();
                 errorMsg = result.getErrorMsg();
-                log.warn("task execute retry scheduled, taskId={}, taskNo={}, executeNo={}, errorCode={}, "
+                log.info("task execute retry scheduled, taskId={}, taskNo={}, executeNo={}, errorCode={}, "
                                 + "nextRetryAt={}, retryCount={}/{}",
                         task.getId(), task.getTaskNo(), executeNo, errorCode, nextRetry, task.getRetryCount() + 1, task.getMaxRetryCount());
             } else {

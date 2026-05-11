@@ -79,24 +79,39 @@ public class DispatchService {
         List<Long> dueTaskIds = queueRedisService.promoteDueTasks(cfg.getGroupCode(), nowMillis, cfg.getDispatchBatchSize());
         int promoted = 0;
         for (Long taskId : dueTaskIds) {
-            taskRepository.findById(taskId).ifPresent(task -> {
-                if (task.getStatus() == TaskStatus.PENDING && task.due(now)) {
+            boolean addedToReady = false;
+            Optional<SchedulerTask> taskOpt = taskRepository.findById(taskId);
+            if (taskOpt.isPresent()) {
+                SchedulerTask task = taskOpt.get();
+                if (task.getStatus() == TaskStatus.PENDING) {
                     boolean promotedNow = taskRepository.markRunnableIfPending(task.getId(), now);
-                    if (!promotedNow) {
-                        return;
+                    if (promotedNow) {
+                        task.setStatus(TaskStatus.RUNNABLE);
                     }
-                    task.setStatus(TaskStatus.RUNNABLE);
                 }
-                if (task.runnableStatus() && task.due(now)) {
+                if (task.runnableStatus()) {
                     queueRedisService.addToReady(task);
+                    addedToReady = true;
+                } else if (task.getExecuteAt() != null && task.getExecuteAt().isAfter(now)
+                        && task.getStatus() == TaskStatus.PENDING) {
+                    queueRedisService.enqueue(task);
                 }
-            });
+                if (!addedToReady) {
+                    log.warn("promoted due task was not added to ready queue, taskId={}, taskNo={}, group={}, user={}, "
+                                    + "status={}, executeAt={}, dueNow={}, removedFromTimeQueue=true",
+                            task.getId(), task.getTaskNo(), task.getGroupCode(), task.getUserId(),
+                            task.getStatus(), task.getExecuteAt(), task.due(now));
+                }
+            } else {
+                log.warn("promoted due task missing in database, taskId={}, group={}, removedFromTimeQueue=true",
+                        taskId, cfg.getGroupCode());
+            }
             promoted++;
         }
 
         long groupRunning = concurrencyGuard.groupRunning(cfg.getGroupCode());
         if (groupRunning >= cfg.getMaxConcurrency()) {
-            log.debug("dispatch group skipped by full concurrency, group={}, groupRunning={}, groupMax={}",
+            log.info("dispatch group skipped by full concurrency, group={}, groupRunning={}, groupMax={}",
                     cfg.getGroupCode(), groupRunning, cfg.getMaxConcurrency());
             return;
         }
@@ -173,7 +188,7 @@ public class DispatchService {
             );
             if (!acquired) {
                 skipped++;
-                log.debug("dispatch acquire failed, taskId={}, taskNo={}, group={}, user={}, groupRunning={}, groupMax={}, userLimit={}",
+                log.info("dispatch acquire false, taskId={}, taskNo={}, group={}, user={}, groupRunning={}, groupMax={}, userLimit={}",
                         task.getId(), task.getTaskNo(), cfg.getGroupCode(), task.getUserId(), groupRunning, cfg.getMaxConcurrency(), userLimit);
                 continue;
             }
