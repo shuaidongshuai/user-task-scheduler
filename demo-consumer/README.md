@@ -57,6 +57,20 @@ export DEMO_DB_LEAK_DETECT_MS='0'
 mvn -pl demo-consumer spring-boot:run
 ```
 
+集成测试一键执行：
+
+```bash
+bash scripts/run_integration_tests.sh
+```
+
+说明：
+
+- 默认使用 IDEA 自带 Maven：`/Applications/IntelliJ IDEA.app/Contents/plugins/maven/lib/maven3/bin/mvn`
+- 默认使用 IDEA JBR：`/Applications/IntelliJ IDEA.app/Contents/jbr/Contents/Home`
+- 脚本会自动启动临时 MySQL/Redis 容器、初始化表结构，并执行 `scheduler-starter` 单测和 `demo-consumer` 集成测试
+- 如需保留容器便于排查，可使用：`bash scripts/run_integration_tests.sh --keep-containers`
+- 如需覆盖脚本默认 JDK，可传：`SCRIPT_JAVA_HOME=/path/to/jdk bash scripts/run_integration_tests.sh`
+
 ## 4. 测试接口
 
 1. 提交任务：

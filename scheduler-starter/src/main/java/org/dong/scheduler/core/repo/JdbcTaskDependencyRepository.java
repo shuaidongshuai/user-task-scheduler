@@ -40,19 +40,52 @@ public class JdbcTaskDependencyRepository implements TaskDependencyRepository {
         Timestamp nowTs = Timestamp.valueOf(now);
         jdbcTemplate.update("""
                 update scheduler_task_dependency d
-                join scheduler_task t on t.id = d.depends_on_task_id
-                   set d.status = case
-                       when t.status = 'SUCCESS' and d.target_state in ('SUCCESS', 'TERMINAL') then 'SATISFIED'
-                       when t.status = 'FAILED' and d.target_state in ('FAILED', 'TERMINAL') then 'SATISFIED'
-                       when t.status = 'CANCELLED' then 'IMPOSSIBLE'
-                       when t.status = 'SUCCESS' and d.target_state = 'FAILED' then 'IMPOSSIBLE'
-                       when t.status = 'FAILED' and d.target_state = 'SUCCESS' then 'IMPOSSIBLE'
-                       else d.status
+                   set status = case
+                       when exists (
+                           select 1
+                             from scheduler_task t
+                            where t.id = d.depends_on_task_id
+                              and t.status = 'SUCCESS'
+                              and d.target_state in ('SUCCESS', 'TERMINAL')
+                       ) then 'SATISFIED'
+                       when exists (
+                           select 1
+                             from scheduler_task t
+                            where t.id = d.depends_on_task_id
+                              and t.status = 'FAILED'
+                              and d.target_state in ('FAILED', 'TERMINAL')
+                       ) then 'SATISFIED'
+                       when exists (
+                           select 1
+                             from scheduler_task t
+                            where t.id = d.depends_on_task_id
+                              and t.status = 'CANCELLED'
+                       ) then 'IMPOSSIBLE'
+                       when exists (
+                           select 1
+                             from scheduler_task t
+                            where t.id = d.depends_on_task_id
+                              and t.status = 'SUCCESS'
+                              and d.target_state = 'FAILED'
+                       ) then 'IMPOSSIBLE'
+                       when exists (
+                           select 1
+                             from scheduler_task t
+                            where t.id = d.depends_on_task_id
+                              and t.status = 'FAILED'
+                              and d.target_state = 'SUCCESS'
+                       ) then 'IMPOSSIBLE'
+                       else status
                    end,
-                       d.update_time = ?
+                       update_time = ?
                  where d.task_id = ?
                    and d.status = 'WAITING'
-                   and t.status in ('SUCCESS', 'FAILED', 'CANCELLED')
+                   and exists (
+                       select 1
+                         from scheduler_task t
+                        where t.id = d.depends_on_task_id
+                          and t.status in ('SUCCESS', 'FAILED', 'CANCELLED')
+                   )
                 """, nowTs, taskId);
 
         jdbcTemplate.update("""

@@ -5,6 +5,10 @@ import org.dong.scheduler.core.enums.TaskStatus;
 import org.dong.scheduler.core.model.SchedulerTask;
 import org.dong.scheduler.core.model.TaskDependencyRequest;
 import org.dong.scheduler.core.model.TaskSubmitRequest;
+import org.dong.scheduler.core.model.batch.BatchSubmitDependencyRequest;
+import org.dong.scheduler.core.model.batch.BatchSubmitRequest;
+import org.dong.scheduler.core.model.batch.BatchSubmitResultItem;
+import org.dong.scheduler.core.model.batch.BatchSubmitTaskRequest;
 import org.dong.scheduler.core.redis.RedisKeys;
 import org.dong.scheduler.core.repo.TaskRepository;
 import org.dong.scheduler.core.service.DispatchService;
@@ -26,6 +30,7 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @SpringBootTest
@@ -59,11 +64,11 @@ class DependencyIntegrationTest {
 
     @Test
     void shouldPromoteDependentTaskAfterUpstreamSuccessAndRefillWhenQueueEntryMissing() {
-        long upstreamId = submitTask(nextBizKey(), LocalDateTime.now(), List.of());
+        long upstreamId = submitTask(nextBizKey(), LocalDateTime.now().minusSeconds(1), List.of());
         String downstreamBizKey = nextBizKey();
         long downstreamId = submitTask(
                 downstreamBizKey,
-                LocalDateTime.now(),
+                LocalDateTime.now().minusSeconds(1),
                 List.of(new TaskDependencyRequest(upstreamId, DependencyTargetState.SUCCESS))
         );
 
@@ -77,10 +82,10 @@ class DependencyIntegrationTest {
 
         SchedulerTask downstreamAfter = taskRepository.findById(downstreamId).orElseThrow();
         assertEquals(TaskStatus.RUNNABLE, downstreamAfter.getStatus());
-        assertTrue(existsInTimeQueue(TEST_GROUP, downstreamId));
+        assertTrue(existsInReadyQueue(TEST_GROUP, downstreamId));
 
-        redisTemplate.opsForZSet().remove(RedisKeys.timeQueue(TEST_GROUP), String.valueOf(downstreamId));
-        assertFalse(existsInTimeQueue(TEST_GROUP, downstreamId));
+        redisTemplate.opsForZSet().remove(RedisKeys.readyQueue(TEST_GROUP), String.valueOf(downstreamId));
+        assertFalse(existsInReadyQueue(TEST_GROUP, downstreamId));
 
         int refilled = recoveryService.refillQueue();
         assertTrue(refilled > 0);
@@ -93,10 +98,10 @@ class DependencyIntegrationTest {
 
     @Test
     void shouldFailDependentTaskImmediatelyWhenExpectedSuccessButUpstreamFails() {
-        long upstreamId = submitTask(nextBizKey(), LocalDateTime.now(), List.of());
+        long upstreamId = submitTask(nextBizKey(), LocalDateTime.now().minusSeconds(1), List.of());
         long downstreamId = submitTask(
                 nextBizKey(),
-                LocalDateTime.now(),
+                LocalDateTime.now().minusSeconds(1),
                 List.of(new TaskDependencyRequest(upstreamId, DependencyTargetState.SUCCESS))
         );
 
@@ -125,15 +130,15 @@ class DependencyIntegrationTest {
 
     @Test
     void shouldSupportMultiLayerDependencyPropagation() {
-        long taskA = submitTask(nextBizKey(), LocalDateTime.now(), List.of());
+        long taskA = submitTask(nextBizKey(), LocalDateTime.now().minusSeconds(1), List.of());
         long taskB = submitTask(
                 nextBizKey(),
-                LocalDateTime.now(),
+                LocalDateTime.now().minusSeconds(1),
                 List.of(new TaskDependencyRequest(taskA, DependencyTargetState.SUCCESS))
         );
         long taskC = submitTask(
                 nextBizKey(),
-                LocalDateTime.now(),
+                LocalDateTime.now().minusSeconds(1),
                 List.of(new TaskDependencyRequest(taskB, DependencyTargetState.TERMINAL))
         );
 
@@ -146,16 +151,16 @@ class DependencyIntegrationTest {
 
         assertTrue(taskStateService.markTerminalByBusinessState(taskB, TaskStatus.SUCCESS, LocalDateTime.now()));
         assertEquals(TaskStatus.RUNNABLE, taskRepository.findById(taskC).orElseThrow().getStatus());
-        assertTrue(existsInTimeQueue(TEST_GROUP, taskC));
+        assertTrue(existsInReadyQueue(TEST_GROUP, taskC));
     }
 
     @Test
     void shouldWaitUntilAllDependenciesReachTheirOwnTargetStates() {
-        long upstreamSuccess = submitTask(nextBizKey(), LocalDateTime.now(), List.of());
-        long upstreamFailed = submitTask(nextBizKey(), LocalDateTime.now(), List.of());
+        long upstreamSuccess = submitTask(nextBizKey(), LocalDateTime.now().minusSeconds(1), List.of());
+        long upstreamFailed = submitTask(nextBizKey(), LocalDateTime.now().minusSeconds(1), List.of());
         long downstreamId = submitTask(
                 nextBizKey(),
-                LocalDateTime.now(),
+                LocalDateTime.now().minusSeconds(1),
                 List.of(
                         new TaskDependencyRequest(upstreamSuccess, DependencyTargetState.SUCCESS),
                         new TaskDependencyRequest(upstreamFailed, DependencyTargetState.FAILED)
@@ -171,16 +176,16 @@ class DependencyIntegrationTest {
         assertTrue(taskStateService.markTerminalByBusinessState(upstreamFailed, TaskStatus.FAILED, LocalDateTime.now()));
         SchedulerTask downstreamAfterSecond = taskRepository.findById(downstreamId).orElseThrow();
         assertEquals(TaskStatus.RUNNABLE, downstreamAfterSecond.getStatus());
-        assertTrue(existsInTimeQueue(TEST_GROUP, downstreamId));
+        assertTrue(existsInReadyQueue(TEST_GROUP, downstreamId));
     }
 
     @Test
     void shouldDispatchAndExecuteDependentTaskAfterDependenciesSatisfied() throws Exception {
-        long upstreamId = submitTask(nextBizKey(), LocalDateTime.now(), List.of());
+        long upstreamId = submitTask(nextBizKey(), LocalDateTime.now().minusSeconds(1), List.of());
         String downstreamBizKey = nextBizKey();
         long downstreamId = submitTask(
                 downstreamBizKey,
-                LocalDateTime.now(),
+                LocalDateTime.now().minusSeconds(1),
                 List.of(new TaskDependencyRequest(upstreamId, DependencyTargetState.SUCCESS)),
                 2,
                 0
@@ -200,6 +205,136 @@ class DependencyIntegrationTest {
                 downstreamBizKey
         );
         assertEquals("SUCCESS", bizStatus);
+    }
+
+    @Test
+    void shouldSubmitBatchWithInBatchDependencies() {
+        LocalDateTime now = LocalDateTime.now().minusSeconds(1);
+        BatchSubmitRequest request = new BatchSubmitRequest(List.of(
+                new BatchSubmitTaskRequest()
+                        .setClientTaskRef("A")
+                        .setGroupCode(TEST_GROUP)
+                        .setUserId(TEST_USER)
+                        .setBizType(BIZ_TYPE)
+                        .setBizKey(nextBizKey())
+                        .setPriority(50)
+                        .setExecuteAt(now)
+                        .setMaxRetryCount(0)
+                        .setExecuteTimeoutSec(5)
+                        .setDependencies(List.of()),
+                new BatchSubmitTaskRequest()
+                        .setClientTaskRef("B")
+                        .setGroupCode(TEST_GROUP)
+                        .setUserId(TEST_USER)
+                        .setBizType(BIZ_TYPE)
+                        .setBizKey(nextBizKey())
+                        .setPriority(40)
+                        .setExecuteAt(now.plusMinutes(1))
+                        .setMaxRetryCount(0)
+                        .setExecuteTimeoutSec(5)
+                        .setDependencies(List.of(new BatchSubmitDependencyRequest(null, "A", DependencyTargetState.SUCCESS)))
+        ));
+
+        List<BatchSubmitResultItem> items = schedulerClient.submitBatch(request);
+
+        assertEquals(2, items.size());
+        long taskAId = items.stream().filter(item -> "A".equals(item.getClientTaskRef())).findFirst().orElseThrow().getTaskId();
+        long taskBId = items.stream().filter(item -> "B".equals(item.getClientTaskRef())).findFirst().orElseThrow().getTaskId();
+
+        SchedulerTask taskA = taskRepository.findById(taskAId).orElseThrow();
+        SchedulerTask taskB = taskRepository.findById(taskBId).orElseThrow();
+        assertEquals(TaskStatus.RUNNABLE, taskA.getStatus());
+        assertEquals(TaskStatus.PENDING, taskB.getStatus());
+
+        Long dependsOnTaskId = jdbcTemplate.queryForObject(
+                """
+                select depends_on_task_id
+                  from scheduler_task_dependency
+                 where task_id = ?
+                """,
+                Long.class,
+                taskBId
+        );
+        assertEquals(taskAId, dependsOnTaskId);
+        assertTrue(existsInReadyQueue(TEST_GROUP, taskAId));
+        assertFalse(existsInTimeQueue(TEST_GROUP, taskBId));
+        assertFalse(existsInReadyQueue(TEST_GROUP, taskBId));
+    }
+
+    @Test
+    void shouldRollbackWholeBatchWhenDependencyInsertFails() {
+        LocalDateTime now = LocalDateTime.now();
+        String upstreamBizKey = nextBizKey();
+        String downstreamBizKey = nextBizKey();
+        TaskStateService.BatchSubmitCommand upstream = new TaskStateService.BatchSubmitCommand(
+                "A",
+                "task-a-" + UUID.randomUUID().toString().replace("-", ""),
+                new TaskSubmitRequest()
+                        .setGroupCode(TEST_GROUP)
+                        .setUserId(TEST_USER)
+                        .setBizType(BIZ_TYPE)
+                        .setBizKey(upstreamBizKey)
+                        .setPriority(50)
+                        .setExecuteAt(now)
+                        .setMaxRetryCount(0)
+                        .setExecuteTimeoutSec(5)
+                        .setDependencies(List.of()),
+                List.of()
+        );
+        TaskStateService.BatchSubmitCommand downstream = new TaskStateService.BatchSubmitCommand(
+                "B",
+                "task-b-" + UUID.randomUUID().toString().replace("-", ""),
+                new TaskSubmitRequest()
+                        .setGroupCode(TEST_GROUP)
+                        .setUserId(TEST_USER)
+                        .setBizType(BIZ_TYPE)
+                        .setBizKey(downstreamBizKey)
+                        .setPriority(40)
+                        .setExecuteAt(now)
+                        .setMaxRetryCount(0)
+                        .setExecuteTimeoutSec(5)
+                        .setDependencies(List.of()),
+                List.of(
+                        new BatchSubmitDependencyRequest(999999L, null, DependencyTargetState.SUCCESS),
+                        new BatchSubmitDependencyRequest(999999L, null, DependencyTargetState.SUCCESS)
+                )
+        );
+
+        assertThrows(Exception.class, () -> taskStateService.submitBatch(List.of(upstream, downstream)));
+
+        Integer taskCount = jdbcTemplate.queryForObject(
+                """
+                select count(1)
+                  from scheduler_task
+                 where group_code = ?
+                   and biz_key in (?, ?)
+                """,
+                Integer.class,
+                TEST_GROUP,
+                upstreamBizKey,
+                downstreamBizKey
+        );
+        Integer dependencyCount = jdbcTemplate.queryForObject(
+                """
+                select count(1)
+                  from scheduler_task_dependency d
+                 where exists (
+                     select 1
+                       from scheduler_task t
+                      where t.id = d.task_id
+                        and t.group_code = ?
+                        and t.biz_key in (?, ?)
+                 )
+                """,
+                Integer.class,
+                TEST_GROUP,
+                upstreamBizKey,
+                downstreamBizKey
+        );
+        assertNotNull(taskCount);
+        assertNotNull(dependencyCount);
+        assertEquals(0, taskCount.intValue());
+        assertEquals(0, dependencyCount.intValue());
     }
 
     private long submitTask(String bizKey, LocalDateTime executeAt, List<TaskDependencyRequest> dependencies) {

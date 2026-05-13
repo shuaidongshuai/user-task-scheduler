@@ -4,10 +4,15 @@ import org.dong.demo.domain.DemoBizTask;
 import org.dong.demo.repo.DemoBizTaskRepository;
 import org.dong.scheduler.core.model.TaskDependencyRequest;
 import org.dong.scheduler.core.model.TaskSubmitRequest;
+import org.dong.scheduler.core.model.batch.BatchSubmitDependencyRequest;
+import org.dong.scheduler.core.model.batch.BatchSubmitRequest;
+import org.dong.scheduler.core.model.batch.BatchSubmitResultItem;
+import org.dong.scheduler.core.model.batch.BatchSubmitTaskRequest;
 import org.dong.scheduler.core.spi.SchedulerClient;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -51,6 +56,37 @@ public class DemoController {
         return Map.of("taskId", taskId, "bizKey", bizKey);
     }
 
+    @PostMapping("/submit-batch")
+    public Map<String, Object> submitBatch(@RequestBody BatchSubmitHttpRequest request) {
+        if (request.tasks() == null || request.tasks().isEmpty()) {
+            throw new IllegalArgumentException("tasks is required");
+        }
+        List<BatchSubmitTaskRequest> tasks = new ArrayList<>();
+        for (BatchTaskHttpRequest task : request.tasks()) {
+            String bizKey = task.bizKey() == null || task.bizKey().isBlank()
+                    ? "biz-" + UUID.randomUUID().toString().replace("-", "")
+                    : task.bizKey();
+            bizTaskRepository.insert(bizKey, task.payload() == null ? "{}" : task.payload());
+            tasks.add(new BatchSubmitTaskRequest()
+                    .setClientTaskRef(task.clientTaskRef())
+                    .setGroupCode(task.groupCode())
+                    .setUserId(task.userId() == null ? "demo-user" : task.userId())
+                    .setBizType("demo.biz.process")
+                    .setBizKey(bizKey)
+                    .setPriority(task.priority() == null ? 50 : task.priority())
+                    .setExecuteAt(task.executeAt())
+                    .setMaxRetryCount(task.maxRetryCount())
+                    .setExecuteTimeoutSec(task.executeTimeoutSec() == null ? 1 : task.executeTimeoutSec())
+                    .setRetryDelaySec(task.retryDelaySec())
+                    .setExtInfo(task.extInfo() == null || task.extInfo().isBlank()
+                            ? (task.forceRetry() != null && task.forceRetry() ? "{\"force_retry\":true}" : null)
+                            : task.extInfo())
+                    .setDependencies(task.dependencies()));
+        }
+        List<BatchSubmitResultItem> result = schedulerClient.submitBatch(new BatchSubmitRequest(tasks));
+        return Map.of("tasks", result);
+    }
+
     @PostMapping("/biz/{bizKey}/status/{status}")
     public Map<String, Object> updateBizStatus(@PathVariable String bizKey, @PathVariable String status) {
         bizTaskRepository.updateStatus(bizKey, status);
@@ -72,6 +108,28 @@ public class DemoController {
             Integer retryDelaySec,
             LocalDateTime executeAt,
             List<TaskDependencyRequest> dependencies,
+            String extInfo,
+            String payload,
+            Boolean forceRetry
+    ) {
+    }
+
+    public record BatchSubmitHttpRequest(
+            List<BatchTaskHttpRequest> tasks
+    ) {
+    }
+
+    public record BatchTaskHttpRequest(
+            String clientTaskRef,
+            String groupCode,
+            String userId,
+            String bizKey,
+            Integer priority,
+            Integer maxRetryCount,
+            Integer executeTimeoutSec,
+            Integer retryDelaySec,
+            LocalDateTime executeAt,
+            List<BatchSubmitDependencyRequest> dependencies,
             String extInfo,
             String payload,
             Boolean forceRetry

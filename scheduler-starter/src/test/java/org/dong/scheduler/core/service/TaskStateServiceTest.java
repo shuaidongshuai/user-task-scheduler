@@ -5,6 +5,8 @@ import org.dong.scheduler.core.enums.TaskStatus;
 import org.dong.scheduler.core.model.SchedulerTask;
 import org.dong.scheduler.core.model.TaskDependencyRequest;
 import org.dong.scheduler.core.model.TaskSubmitRequest;
+import org.dong.scheduler.core.model.batch.BatchSubmitDependencyRequest;
+import org.dong.scheduler.core.model.batch.BatchSubmitResultItem;
 import org.dong.scheduler.core.redis.QueueRedisService;
 import org.dong.scheduler.core.repo.TaskRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -20,9 +22,9 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -138,5 +140,86 @@ class TaskStateServiceTest {
         assertTrue(changed);
         verify(queueRedisService).addToReady(downstream1);
         verify(queueRedisService).enqueue(downstream2);
+    }
+
+    @Test
+    void shouldResolveBatchDependencyByClientTaskRefAndSubmitInOrder() {
+        LocalDateTime now = LocalDateTime.now();
+        TaskSubmitRequest taskA = new TaskSubmitRequest()
+                .setGroupCode("g1")
+                .setUserId("u1")
+                .setBizType("demo.biz")
+                .setBizKey("biz-a")
+                .setPriority(10)
+                .setExecuteAt(now.minusSeconds(1))
+                .setMaxRetryCount(3);
+        TaskSubmitRequest taskB = new TaskSubmitRequest()
+                .setGroupCode("g1")
+                .setUserId("u1")
+                .setBizType("demo.biz")
+                .setBizKey("biz-b")
+                .setPriority(10)
+                .setExecuteAt(now.plusMinutes(1))
+                .setMaxRetryCount(3);
+        TaskStateService.BatchSubmitCommand cmdA = new TaskStateService.BatchSubmitCommand(
+                "A", "task-a", taskA, List.of());
+        TaskStateService.BatchSubmitCommand cmdB = new TaskStateService.BatchSubmitCommand(
+                "B", "task-b", taskB,
+                List.of(new BatchSubmitDependencyRequest(null, "A", DependencyTargetState.SUCCESS)));
+
+        SchedulerTask persistedA = new SchedulerTask();
+        persistedA.setId(101L);
+        persistedA.setStatus(TaskStatus.RUNNABLE);
+        persistedA.setGroupCode("g1");
+        persistedA.setExecuteAt(taskA.getExecuteAt());
+
+        SchedulerTask persistedB = new SchedulerTask();
+        persistedB.setId(102L);
+        persistedB.setStatus(TaskStatus.PENDING);
+        persistedB.setGroupCode("g1");
+        persistedB.setExecuteAt(taskB.getExecuteAt());
+
+        when(taskRepository.insert(eq("task-a"), eq(taskA), eq(taskA.getExtInfo()), eq(TaskStatus.RUNNABLE))).thenReturn(101L);
+        when(taskRepository.insert(eq("task-b"), eq(taskB), eq(taskB.getExtInfo()), eq(TaskStatus.PENDING))).thenReturn(102L);
+        when(taskRepository.findById(101L)).thenReturn(Optional.of(persistedA));
+        when(taskRepository.findById(102L)).thenReturn(Optional.of(persistedB));
+        when(taskDependencyService.refreshTaskAfterSubmit(eq(102L), any(LocalDateTime.class))).thenReturn(persistedB);
+
+        List<BatchSubmitResultItem> result = taskStateService.submitBatch(List.of(cmdA, cmdB));
+
+        assertEquals(2, result.size());
+        assertEquals("A", result.get(0).getClientTaskRef());
+        assertEquals(101L, result.get(0).getTaskId());
+        verify(taskDependencyService).createDependencies(eq(102L),
+                eq(List.of(new TaskDependencyRequest(101L, DependencyTargetState.SUCCESS))),
+                any(LocalDateTime.class));
+        verify(queueRedisService).addToReady(persistedA);
+        verify(queueRedisService).enqueue(persistedB);
+    }
+
+    @Test
+    void shouldFailBatchWhenDependencyRefMissing() {
+        TaskSubmitRequest task = new TaskSubmitRequest()
+                .setGroupCode("g1")
+                .setUserId("u1")
+                .setBizType("demo.biz")
+                .setBizKey("biz-a")
+                .setPriority(10)
+                .setExecuteAt(LocalDateTime.now())
+                .setMaxRetryCount(3);
+        TaskStateService.BatchSubmitCommand cmd = new TaskStateService.BatchSubmitCommand(
+                "B", "task-b", task,
+                List.of(new BatchSubmitDependencyRequest(null, "A", DependencyTargetState.SUCCESS)));
+        SchedulerTask persisted = new SchedulerTask();
+        persisted.setId(201L);
+        persisted.setStatus(TaskStatus.PENDING);
+        persisted.setExecuteAt(task.getExecuteAt());
+
+        when(taskRepository.insert(eq("task-b"), eq(task), eq(task.getExtInfo()), eq(TaskStatus.PENDING))).thenReturn(201L);
+        when(taskRepository.findById(201L)).thenReturn(Optional.of(persisted));
+
+        assertThrows(IllegalArgumentException.class, () -> taskStateService.submitBatch(List.of(cmd)));
+        verify(queueRedisService, never()).addToReady(any());
+        verify(queueRedisService, never()).enqueue(any());
     }
 }

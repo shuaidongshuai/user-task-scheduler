@@ -1,6 +1,10 @@
 package org.dong.scheduler.core.spi;
 
 import org.dong.scheduler.core.model.TaskSubmitRequest;
+import org.dong.scheduler.core.model.batch.BatchSubmitRequest;
+import org.dong.scheduler.core.model.batch.BatchSubmitResultItem;
+
+import java.util.List;
 
 public interface SchedulerClient {
     /**
@@ -15,6 +19,11 @@ public interface SchedulerClient {
      * <p>必填参数：groupCode、userId、bizType、bizKey。</p>
      */
     long submit(TaskSubmitRequest request);
+
+    /**
+     * 批量提交任务。批内任务及依赖在同一事务内落库；任一任务失败将整体回滚。
+     */
+    List<BatchSubmitResultItem> submitBatch(BatchSubmitRequest request);
 
     boolean cancel(String taskNo);
 }
