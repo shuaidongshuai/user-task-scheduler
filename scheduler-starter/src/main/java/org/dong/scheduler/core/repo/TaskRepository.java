@@ -16,6 +16,8 @@ public interface TaskRepository {
 
     Optional<SchedulerTask> findByTaskNo(String taskNo);
 
+    List<Long> findExistingTaskIds(List<Long> taskIds);
+
     boolean casToRunning(Long id, String instanceId, String threadName, LocalDateTime now);
 
     boolean markSuccess(Long id, LocalDateTime now);

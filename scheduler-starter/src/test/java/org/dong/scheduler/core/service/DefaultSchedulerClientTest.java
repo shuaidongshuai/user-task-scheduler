@@ -2,6 +2,8 @@ package org.dong.scheduler.core.service;
 
 import org.dong.scheduler.config.SchedulerProperties;
 import org.dong.scheduler.core.enums.DependencyTargetState;
+import org.dong.scheduler.core.model.TaskDependencyRequest;
+import org.dong.scheduler.core.model.TaskSubmitRequest;
 import org.dong.scheduler.core.model.batch.BatchSubmitDependencyRequest;
 import org.dong.scheduler.core.model.batch.BatchSubmitRequest;
 import org.dong.scheduler.core.model.batch.BatchSubmitResultItem;
@@ -81,6 +83,39 @@ class DefaultSchedulerClientTest {
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, () -> schedulerClient.submitBatch(request));
 
         assertEquals("dependency requires exactly one of dependsOnTaskId/dependsOnClientTaskRef", ex.getMessage());
+    }
+
+    @Test
+    void shouldRejectSingleSubmitWhenDependencyTaskIdDoesNotExist() {
+        TaskSubmitRequest request = new TaskSubmitRequest()
+                .setUserId("u1")
+                .setBizType("demo.biz")
+                .setBizKey("biz-a")
+                .setExecuteAt(LocalDateTime.now())
+                .setDependencies(List.of(new TaskDependencyRequest(123L, DependencyTargetState.SUCCESS)));
+        when(taskRepository.findExistingTaskIds(List.of(123L))).thenReturn(List.of());
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, () -> schedulerClient.submit(request));
+
+        assertEquals("dependency taskId not found: 123", ex.getMessage());
+    }
+
+    @Test
+    void shouldRejectBatchSubmitWhenDependencyTaskIdDoesNotExist() {
+        BatchSubmitRequest request = new BatchSubmitRequest(List.of(
+                new BatchSubmitTaskRequest()
+                        .setClientTaskRef("A")
+                        .setUserId("u1")
+                        .setBizType("demo.biz")
+                        .setBizKey("biz-a")
+                        .setExecuteAt(LocalDateTime.now())
+                        .setDependencies(List.of(new BatchSubmitDependencyRequest(123L, null, DependencyTargetState.SUCCESS)))
+        ));
+        when(taskRepository.findExistingTaskIds(List.of(123L))).thenReturn(List.of());
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, () -> schedulerClient.submitBatch(request));
+
+        assertEquals("dependency taskId not found: 123", ex.getMessage());
     }
 
     @Test

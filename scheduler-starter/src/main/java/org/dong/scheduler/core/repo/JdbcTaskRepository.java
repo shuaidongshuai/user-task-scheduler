@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 public class JdbcTaskRepository implements TaskRepository {
     private final JdbcTemplate jdbcTemplate;
@@ -74,6 +75,19 @@ public class JdbcTaskRepository implements TaskRepository {
     public Optional<SchedulerTask> findByTaskNo(String taskNo) {
         List<SchedulerTask> list = jdbcTemplate.query("select * from scheduler_task where task_no = ?", this::mapTask, taskNo);
         return list.stream().findFirst();
+    }
+
+    @Override
+    public List<Long> findExistingTaskIds(List<Long> taskIds) {
+        if (taskIds == null || taskIds.isEmpty()) {
+            return List.of();
+        }
+        String placeholders = taskIds.stream().map(id -> "?").collect(Collectors.joining(","));
+        return jdbcTemplate.query(
+                "select id from scheduler_task where id in (" + placeholders + ")",
+                (rs, rowNum) -> rs.getLong(1),
+                taskIds.toArray()
+        );
     }
 
     @Override

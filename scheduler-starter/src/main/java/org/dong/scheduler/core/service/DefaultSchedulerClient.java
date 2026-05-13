@@ -147,6 +147,7 @@ public class DefaultSchedulerClient implements SchedulerClient {
                 throw new IllegalArgumentException("duplicate dependency taskId: " + dependency.getTaskId());
             }
         }
+        ensureTaskIdsExist(new ArrayList<>(taskIds));
         request.setDependencies(dependencies);
     }
 
@@ -192,6 +193,7 @@ public class DefaultSchedulerClient implements SchedulerClient {
                 .filter(Objects::nonNull)
                 .toList();
         Set<String> dedup = new HashSet<>();
+        Set<Long> taskIds = new HashSet<>();
         for (BatchSubmitDependencyRequest dependency : normalized) {
             boolean hasTaskId = dependency.getDependsOnTaskId() != null;
             boolean hasRef = dependency.getDependsOnClientTaskRef() != null
@@ -201,6 +203,9 @@ public class DefaultSchedulerClient implements SchedulerClient {
             }
             if (hasTaskId && dependency.getDependsOnTaskId() <= 0) {
                 throw new IllegalArgumentException("dependency dependsOnTaskId must be positive");
+            }
+            if (hasTaskId) {
+                taskIds.add(dependency.getDependsOnTaskId());
             }
             if (hasRef) {
                 dependency.setDependsOnClientTaskRef(normalizeRef(dependency.getDependsOnClientTaskRef()));
@@ -218,7 +223,21 @@ public class DefaultSchedulerClient implements SchedulerClient {
                 throw new IllegalArgumentException("duplicate dependency: " + depKey);
             }
         }
+        ensureTaskIdsExist(new ArrayList<>(taskIds));
         return normalized;
+    }
+
+    private void ensureTaskIdsExist(List<Long> taskIds) {
+        if (taskIds == null || taskIds.isEmpty()) {
+            return;
+        }
+        List<Long> existing = taskRepository.findExistingTaskIds(taskIds);
+        Set<Long> existingIds = new HashSet<>(existing);
+        for (Long taskId : taskIds) {
+            if (!existingIds.contains(taskId)) {
+                throw new IllegalArgumentException("dependency taskId not found: " + taskId);
+            }
+        }
     }
 
     private String normalizeRef(String ref) {
