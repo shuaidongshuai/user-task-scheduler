@@ -248,7 +248,12 @@ public class WorkerService {
             }
         }));
         try {
-            return future.get(timeoutSec, TimeUnit.SECONDS);
+            TaskExecuteResult result = future.get(timeoutSec, TimeUnit.SECONDS);
+            if (result == null) {
+                log.warn("task handler returned null result, taskId={}, taskNo={}", task.getId(), task.getTaskNo());
+                return TaskExecuteResult.failed("TASK_HANDLER_NULL_RESULT", "task handler returned null result", false);
+            }
+            return result;
         } catch (java.util.concurrent.TimeoutException e) {
             future.cancel(true);
             Thread t = runningThread.get();

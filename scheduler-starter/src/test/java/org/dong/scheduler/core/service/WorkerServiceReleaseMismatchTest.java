@@ -108,4 +108,58 @@ class WorkerServiceReleaseMismatchTest {
         verify(taskRepository).finishExecution(eq("exec-old"), eq(org.dong.scheduler.core.enums.TaskStatus.SUCCESS), any(), any(), any(LocalDateTime.class));
         verify(taskRepository).insertExecutionStart(eq(task), eq("exec-old"), anyString(), anyString(), any(LocalDateTime.class));
     }
+
+    @Test
+    void shouldTreatNullHandlerResultAsFailedExecution() throws Exception {
+        SchedulerProperties properties = new SchedulerProperties();
+        properties.setInstanceId("ins-test");
+        properties.setWorkerThreads(2);
+        properties.setHeartbeatIntervalSec(60);
+        properties.setDefaultExecuteTimeoutSec(5);
+
+        workerExecutor = new ThreadPoolTaskExecutor();
+        workerExecutor.setCorePoolSize(1);
+        workerExecutor.setMaxPoolSize(1);
+        workerExecutor.setQueueCapacity(8);
+        workerExecutor.initialize();
+
+        when(taskHandler.bizTypes()).thenReturn(List.of("demo.biz"));
+        when(taskHandler.execute(any(SchedulerTask.class))).thenReturn(null);
+        when(taskStateService.markFailed(eq(1L), eq("TASK_HANDLER_NULL_RESULT"),
+                eq("task handler returned null result"), any(LocalDateTime.class))).thenReturn(true);
+        when(concurrencyGuard.release("g1", "u1", 1L, "exec-null")).thenReturn(true);
+
+        TaskHandlerRegistry registry = new TaskHandlerRegistry(List.of(taskHandler));
+        BusinessTaskStateProviderRegistry stateProviderRegistry = new BusinessTaskStateProviderRegistry(List.of());
+        workerService = new WorkerService(
+                properties,
+                taskRepository,
+                registry,
+                concurrencyGuard,
+                queueRedisService,
+                recoveryService,
+                workerExecutor,
+                stateProviderRegistry,
+                taskStateService
+        );
+
+        SchedulerTask task = new SchedulerTask();
+        task.setId(1L);
+        task.setTaskNo("task-1");
+        task.setGroupCode("g1");
+        task.setUserId("u1");
+        task.setBizType("demo.biz");
+        task.setExecuteAt(LocalDateTime.now());
+        task.setMaxRetryCount(0);
+
+        GroupConfig cfg = new GroupConfig();
+        cfg.setLockExpireSec(30);
+
+        ReflectionTestUtils.invokeMethod(workerService, "run", task, cfg, "exec-null");
+
+        verify(taskStateService).markFailed(eq(1L), eq("TASK_HANDLER_NULL_RESULT"),
+                eq("task handler returned null result"), any(LocalDateTime.class));
+        verify(taskRepository).finishExecution(eq("exec-null"), eq(org.dong.scheduler.core.enums.TaskStatus.FAILED),
+                eq("TASK_HANDLER_NULL_RESULT"), eq("task handler returned null result"), any(LocalDateTime.class));
+    }
 }
