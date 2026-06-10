@@ -60,6 +60,14 @@ public class QueueRedisService {
         return values.stream().map(Long::valueOf).toList();
     }
 
+    public List<Long> peekReady(String groupCode, int offset, int limit) {
+        Set<String> values = redisTemplate.opsForZSet().range(RedisKeys.readyQueue(groupCode), offset, offset + limit - 1);
+        if (values == null || values.isEmpty()) {
+            return List.of();
+        }
+        return values.stream().map(Long::valueOf).toList();
+    }
+
     public void removeFromReady(String groupCode, long taskId) {
         redisTemplate.opsForZSet().remove(RedisKeys.readyQueue(groupCode), String.valueOf(taskId));
     }

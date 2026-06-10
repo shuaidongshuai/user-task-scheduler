@@ -46,3 +46,6 @@ build/
 /utask-scheduler/.obsidian/graph.json
 /.obsidian/workspace.json
 /utask-scheduler/.obsidian/workspace.json
+/.codegraph/
+/.idea/
+/.obsidian/

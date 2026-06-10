@@ -18,9 +18,11 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -90,5 +92,115 @@ class DispatchServiceTest {
 
         verify(queueRedisService).addToReady(task);
         verify(queueRedisService, never()).enqueue(task);
+    }
+
+    @Test
+    void shouldPageReadyQueueAndSkipSaturatedUserInSameRound() {
+        GroupConfig group = new GroupConfig();
+        group.setGroupCode("g1");
+        group.setEnabled(true);
+        group.setMaxConcurrency(5);
+        group.setDispatchBatchSize(2);
+        group.setLockExpireSec(60);
+
+        SchedulerTask saturatedFirst = runnableTask(101L, "u-full");
+        SchedulerTask saturatedSecond = runnableTask(102L, "u-full");
+        SchedulerTask runnableOtherUser = runnableTask(103L, "u-ok");
+        SchedulerTask saturatedThird = runnableTask(104L, "u-full");
+
+        when(groupConfigRepository.listEnabled()).thenReturn(List.of(group));
+        when(queueRedisService.promoteDueTasks(eq("g1"), anyLong(), eq(2))).thenReturn(List.of());
+        when(concurrencyGuard.groupRunning("g1")).thenReturn(3L, 3L, 3L, 3L, 5L);
+        when(queueRedisService.peekReady("g1", 0, 2)).thenReturn(List.of(101L, 102L));
+        when(queueRedisService.peekReady("g1", 2, 2)).thenReturn(List.of(103L, 104L));
+        when(taskRepository.findById(101L)).thenReturn(Optional.of(saturatedFirst));
+        when(taskRepository.findById(102L)).thenReturn(Optional.of(saturatedSecond));
+        when(taskRepository.findById(103L)).thenReturn(Optional.of(runnableOtherUser));
+        when(taskRepository.findById(104L)).thenReturn(Optional.of(saturatedThird));
+        when(dynamicUserLimitService.calculate(group, 3L)).thenReturn(3);
+        when(concurrencyGuard.tryAcquire("g1", "u-full", 101L, 5, 3, 60, "exec-103")).thenReturn(false);
+        when(concurrencyGuard.userRunning("g1", "u-full")).thenReturn(3L);
+        when(workerService.newExecuteNo()).thenReturn("exec-103", "exec-104");
+        when(concurrencyGuard.tryAcquire("g1", "u-ok", 103L, 5, 3, 60, "exec-104")).thenReturn(true);
+        when(taskRepository.casToRunning(eq(103L), eq(null), eq(Thread.currentThread().getName()), any(LocalDateTime.class)))
+                .thenReturn(true);
+
+        dispatchService.dispatchOnce();
+
+        verify(concurrencyGuard).tryAcquire("g1", "u-full", 101L, 5, 3, 60, "exec-103");
+        verify(concurrencyGuard, never()).tryAcquire(eq("g1"), eq("u-full"), eq(102L), eq(5), eq(3), eq(60), eq("exec-104"));
+        verify(concurrencyGuard, never()).tryAcquire(eq("g1"), eq("u-full"), eq(104L), eq(5), eq(3), eq(60), eq("exec-104"));
+        verify(workerService).submit(runnableOtherUser, group, "exec-104");
+        verify(queueRedisService).removeFromReady("g1", 103L);
+        verify(queueRedisService).peekReady("g1", 0, 2);
+        verify(queueRedisService).peekReady("g1", 2, 2);
+        verify(workerService, times(2)).newExecuteNo();
+    }
+
+    @Test
+    void shouldUseDispatchBatchSizeAsReadyPageSize() {
+        GroupConfig group = new GroupConfig();
+        group.setGroupCode("g1");
+        group.setEnabled(true);
+        group.setMaxConcurrency(5);
+        group.setDispatchBatchSize(2);
+
+        when(groupConfigRepository.listEnabled()).thenReturn(List.of(group));
+        when(queueRedisService.promoteDueTasks(eq("g1"), anyLong(), eq(2))).thenReturn(List.of());
+        when(concurrencyGuard.groupRunning("g1")).thenReturn(0L);
+        when(queueRedisService.peekReady("g1", 0, 2)).thenReturn(List.of());
+
+        dispatchService.dispatchOnce();
+
+        verify(queueRedisService).peekReady("g1", 0, 2);
+    }
+
+    @Test
+    void shouldRepeatReadyScanWhileGroupStillHasCapacity() {
+        GroupConfig group = new GroupConfig();
+        group.setGroupCode("g1");
+        group.setEnabled(true);
+        group.setMaxConcurrency(2);
+        group.setDispatchBatchSize(1);
+        group.setLockExpireSec(60);
+
+        SchedulerTask first = runnableTask(201L, "u1");
+        SchedulerTask second = runnableTask(202L, "u2");
+
+        when(groupConfigRepository.listEnabled()).thenReturn(List.of(group));
+        when(queueRedisService.promoteDueTasks(eq("g1"), anyLong(), eq(1))).thenReturn(List.of());
+        when(concurrencyGuard.groupRunning("g1")).thenReturn(0L, 0L, 1L);
+        when(queueRedisService.peekReady("g1", 0, 1)).thenReturn(List.of(201L), List.of(202L));
+        when(taskRepository.findById(201L)).thenReturn(Optional.of(first));
+        when(taskRepository.findById(202L)).thenReturn(Optional.of(second));
+        when(dynamicUserLimitService.calculate(group, 0L)).thenReturn(1);
+        when(dynamicUserLimitService.calculate(group, 1L)).thenReturn(1);
+        when(workerService.newExecuteNo()).thenReturn("exec-201", "exec-202");
+        when(concurrencyGuard.tryAcquire("g1", "u1", 201L, 2, 1, 60, "exec-201")).thenReturn(true);
+        when(concurrencyGuard.tryAcquire("g1", "u2", 202L, 2, 1, 60, "exec-202")).thenReturn(true);
+        when(taskRepository.casToRunning(eq(201L), eq(null), eq(Thread.currentThread().getName()), any(LocalDateTime.class)))
+                .thenReturn(true);
+        when(taskRepository.casToRunning(eq(202L), eq(null), eq(Thread.currentThread().getName()), any(LocalDateTime.class)))
+                .thenReturn(true);
+
+        dispatchService.dispatchOnce();
+
+        verify(queueRedisService, times(2)).peekReady("g1", 0, 1);
+        verify(workerService).submit(first, group, "exec-201");
+        verify(workerService).submit(second, group, "exec-202");
+    }
+
+    private SchedulerTask runnableTask(long id, String userId) {
+        SchedulerTask task = new SchedulerTask();
+        task.setId(id);
+        task.setTaskNo("task-" + id);
+        task.setGroupCode("g1");
+        task.setUserId(userId);
+        task.setBizType("biz");
+        task.setStatus(TaskStatus.RUNNABLE);
+        task.setPriority(0);
+        task.setExecuteAt(LocalDateTime.now().minusSeconds(1));
+        task.setCreateTime(LocalDateTime.now().minusSeconds(10));
+        return task;
     }
 }
