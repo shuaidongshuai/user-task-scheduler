@@ -16,6 +16,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.mockito.ArgumentMatchers.any;
@@ -28,6 +29,7 @@ import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class DispatchServiceTest {
+    private SchedulerProperties properties;
 
     @Mock
     private GroupConfigRepository groupConfigRepository;
@@ -50,7 +52,7 @@ class DispatchServiceTest {
 
     @BeforeEach
     void setUp() {
-        SchedulerProperties properties = new SchedulerProperties();
+        properties = new SchedulerProperties();
         BusinessTaskStateProviderRegistry providerRegistry = new BusinessTaskStateProviderRegistry(List.of());
         dispatchService = new DispatchService(
                 properties,
@@ -113,10 +115,14 @@ class DispatchServiceTest {
         when(concurrencyGuard.groupRunning("g1")).thenReturn(3L, 3L, 3L, 3L, 5L);
         when(queueRedisService.peekReady("g1", 0, 2)).thenReturn(List.of(101L, 102L));
         when(queueRedisService.peekReady("g1", 2, 2)).thenReturn(List.of(103L, 104L));
-        when(taskRepository.findById(101L)).thenReturn(Optional.of(saturatedFirst));
-        when(taskRepository.findById(102L)).thenReturn(Optional.of(saturatedSecond));
-        when(taskRepository.findById(103L)).thenReturn(Optional.of(runnableOtherUser));
-        when(taskRepository.findById(104L)).thenReturn(Optional.of(saturatedThird));
+        when(taskRepository.findByIds(List.of(101L, 102L))).thenReturn(Map.of(
+                101L, saturatedFirst,
+                102L, saturatedSecond
+        ));
+        when(taskRepository.findByIds(List.of(103L, 104L))).thenReturn(Map.of(
+                103L, runnableOtherUser,
+                104L, saturatedThird
+        ));
         when(dynamicUserLimitService.calculate(group, 3L)).thenReturn(3);
         when(concurrencyGuard.tryAcquire("g1", "u-full", 101L, 5, 3, 60, "exec-103")).thenReturn(false);
         when(concurrencyGuard.userRunning("g1", "u-full")).thenReturn(3L);
@@ -134,6 +140,8 @@ class DispatchServiceTest {
         verify(queueRedisService).removeFromReady("g1", 103L);
         verify(queueRedisService).peekReady("g1", 0, 2);
         verify(queueRedisService).peekReady("g1", 2, 2);
+        verify(taskRepository).findByIds(List.of(101L, 102L));
+        verify(taskRepository).findByIds(List.of(103L, 104L));
         verify(workerService, times(2)).newExecuteNo();
     }
 
@@ -156,6 +164,40 @@ class DispatchServiceTest {
     }
 
     @Test
+    void shouldStopReadyScanAtConfiguredPageLimit() {
+        properties.setReadyScanPageLimit(2);
+
+        GroupConfig group = new GroupConfig();
+        group.setGroupCode("g1");
+        group.setEnabled(true);
+        group.setMaxConcurrency(5);
+        group.setDispatchBatchSize(1);
+        group.setLockExpireSec(60);
+
+        SchedulerTask first = runnableTask(301L, "u-full");
+        SchedulerTask second = runnableTask(302L, "u-full");
+
+        when(groupConfigRepository.listEnabled()).thenReturn(List.of(group));
+        when(queueRedisService.promoteDueTasks(eq("g1"), anyLong(), eq(1))).thenReturn(List.of());
+        when(concurrencyGuard.groupRunning("g1")).thenReturn(0L, 0L, 0L);
+        when(queueRedisService.peekReady("g1", 0, 1)).thenReturn(List.of(301L));
+        when(queueRedisService.peekReady("g1", 1, 1)).thenReturn(List.of(302L));
+        when(taskRepository.findByIds(List.of(301L))).thenReturn(Map.of(301L, first));
+        when(taskRepository.findByIds(List.of(302L))).thenReturn(Map.of(302L, second));
+        when(dynamicUserLimitService.calculate(group, 0L)).thenReturn(1);
+        when(workerService.newExecuteNo()).thenReturn("exec-301", "exec-302");
+        when(concurrencyGuard.tryAcquire("g1", "u-full", 301L, 5, 1, 60, "exec-301")).thenReturn(false);
+        when(concurrencyGuard.tryAcquire("g1", "u-full", 302L, 5, 1, 60, "exec-302")).thenReturn(false);
+        when(concurrencyGuard.userRunning("g1", "u-full")).thenReturn(0L);
+
+        dispatchService.dispatchOnce();
+
+        verify(queueRedisService).peekReady("g1", 0, 1);
+        verify(queueRedisService).peekReady("g1", 1, 1);
+        verify(queueRedisService, never()).peekReady("g1", 2, 1);
+    }
+
+    @Test
     void shouldRepeatReadyScanWhileGroupStillHasCapacity() {
         GroupConfig group = new GroupConfig();
         group.setGroupCode("g1");
@@ -171,8 +213,8 @@ class DispatchServiceTest {
         when(queueRedisService.promoteDueTasks(eq("g1"), anyLong(), eq(1))).thenReturn(List.of());
         when(concurrencyGuard.groupRunning("g1")).thenReturn(0L, 0L, 1L);
         when(queueRedisService.peekReady("g1", 0, 1)).thenReturn(List.of(201L), List.of(202L));
-        when(taskRepository.findById(201L)).thenReturn(Optional.of(first));
-        when(taskRepository.findById(202L)).thenReturn(Optional.of(second));
+        when(taskRepository.findByIds(List.of(201L))).thenReturn(Map.of(201L, first));
+        when(taskRepository.findByIds(List.of(202L))).thenReturn(Map.of(202L, second));
         when(dynamicUserLimitService.calculate(group, 0L)).thenReturn(1);
         when(dynamicUserLimitService.calculate(group, 1L)).thenReturn(1);
         when(workerService.newExecuteNo()).thenReturn("exec-201", "exec-202");
@@ -186,6 +228,8 @@ class DispatchServiceTest {
         dispatchService.dispatchOnce();
 
         verify(queueRedisService, times(2)).peekReady("g1", 0, 1);
+        verify(taskRepository).findByIds(List.of(201L));
+        verify(taskRepository).findByIds(List.of(202L));
         verify(workerService).submit(first, group, "exec-201");
         verify(workerService).submit(second, group, "exec-202");
     }
@@ -205,11 +249,12 @@ class DispatchServiceTest {
         when(queueRedisService.promoteDueTasks(eq("g1"), anyLong(), eq(1))).thenReturn(List.of());
         when(concurrencyGuard.groupRunning("g1")).thenReturn(0L);
         when(queueRedisService.peekReady("g1", 0, 1)).thenReturn(List.of(501L), List.of());
-        when(taskRepository.findById(501L)).thenReturn(Optional.of(timedOut));
+        when(taskRepository.findByIds(List.of(501L))).thenReturn(Map.of(501L, timedOut));
         when(taskStateService.markFailedByWaitDeadline(eq(501L), any(LocalDateTime.class))).thenReturn(true);
 
         dispatchService.dispatchOnce();
 
+        verify(taskRepository).findByIds(List.of(501L));
         verify(taskStateService).markFailedByWaitDeadline(eq(501L), any(LocalDateTime.class));
         verify(queueRedisService).removeFromReady("g1", 501L);
         verify(workerService, never()).submit(any(), eq(group), any());

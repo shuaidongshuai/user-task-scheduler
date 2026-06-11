@@ -82,6 +82,20 @@ public class JdbcTaskRepository implements TaskRepository {
     }
 
     @Override
+    public Map<Long, SchedulerTask> findByIds(List<Long> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return Map.of();
+        }
+        String placeholders = ids.stream().map(id -> "?").collect(Collectors.joining(","));
+        List<SchedulerTask> tasks = jdbcTemplate.query(
+                "select * from scheduler_task where id in (" + placeholders + ")",
+                this::mapTask,
+                ids.toArray()
+        );
+        return tasks.stream().collect(Collectors.toMap(SchedulerTask::getId, task -> task));
+    }
+
+    @Override
     public Optional<SchedulerTask> findByTaskNo(String taskNo) {
         List<SchedulerTask> list = jdbcTemplate.query("select * from scheduler_task where task_no = ?", this::mapTask, taskNo);
         return list.stream().findFirst();

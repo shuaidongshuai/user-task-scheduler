@@ -24,6 +24,10 @@ public class SchedulerProperties {
     private long waitTimeoutScanIntervalMs = 1000;
     private long recoveryIntervalMs = 30_000;
     private long queueRefillIntervalMs = 15_000;
+    /**
+     * Max ready-queue pages scanned in one dispatch round for a group.
+     */
+    private int readyScanPageLimit = 10;
     private int recoveryScanLimit = 200;
     private int queueRefillLimit = 500;
     private int workerThreads = 16;

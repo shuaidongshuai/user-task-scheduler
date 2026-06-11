@@ -15,6 +15,7 @@ import org.dong.scheduler.core.spi.BusinessTaskStateProvider;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.HashSet;
 import java.util.Set;
@@ -25,7 +26,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class DispatchService {
     private static final ZoneId SYSTEM_ZONE = ZoneId.systemDefault();
     private static final int SUMMARY_LOG_EVERY_N = 5;
-    private static final int MAX_READY_SCAN_PAGES = 100;
 
     private final SchedulerProperties properties;
     private final GroupConfigRepository groupConfigRepository;
@@ -126,7 +126,8 @@ public class DispatchService {
         int skipped = 0;
         int readyScanned = 0;
         int readyScanPages = 0;
-        while (groupRunning < cfg.getMaxConcurrency() && readyScanPages < MAX_READY_SCAN_PAGES) {
+        int readyScanPageLimit = Math.max(1, properties.getReadyScanPageLimit());
+        while (groupRunning < cfg.getMaxConcurrency() && readyScanPages < readyScanPageLimit) {
             groupRunning = concurrencyGuard.groupRunning(cfg.getGroupCode());
             if (groupRunning >= cfg.getMaxConcurrency()) {
                 break;
@@ -138,21 +139,21 @@ public class DispatchService {
             }
             readyScanPages++;
             readyScanned += ready.size();
+            Map<Long, SchedulerTask> readyTasks = taskRepository.findByIds(ready);
             boolean progressed = false;
             for (Long taskId : ready) {
                 if (groupRunning >= cfg.getMaxConcurrency()) {
                     break;
                 }
 
-                Optional<SchedulerTask> taskOpt = taskRepository.findById(taskId);
-                if (taskOpt.isEmpty()) {
+                SchedulerTask task = readyTasks.get(taskId);
+                if (task == null) {
                     queueRedisService.removeFromReady(cfg.getGroupCode(), taskId);
                     progressed = true;
                     skipped++;
                     log.debug("dispatch skip missing task, group={}, taskId={}", cfg.getGroupCode(), taskId);
                     continue;
                 }
-                SchedulerTask task = taskOpt.get();
                 if (!task.runnableStatus() || !task.due(now)) {
                     queueRedisService.removeFromReady(cfg.getGroupCode(), taskId);
                     progressed = true;
@@ -308,7 +309,7 @@ public class DispatchService {
             }
         }
 
-        if (readyScanPages >= MAX_READY_SCAN_PAGES && groupRunning < cfg.getMaxConcurrency()) {
+        if (readyScanPages >= readyScanPageLimit && groupRunning < cfg.getMaxConcurrency()) {
             log.warn("dispatch ready scan page limit reached, group={}, readyScanPages={}, pageSize={}, readyScanned={}, "
                             + "dispatched={}, skipped={}, saturatedUsers={}, groupRunning={}, groupMax={}",
                     cfg.getGroupCode(), readyScanPages, pageSize, readyScanned, dispatched, skipped,

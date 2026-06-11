@@ -14,6 +14,8 @@ public interface TaskRepository {
 
     Optional<SchedulerTask> findById(Long id);
 
+    Map<Long, SchedulerTask> findByIds(List<Long> ids);
+
     Optional<SchedulerTask> findByTaskNo(String taskNo);
 
     List<Long> findExistingTaskIds(List<Long> taskIds);
