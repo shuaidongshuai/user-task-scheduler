@@ -152,6 +152,79 @@ class DefaultTaskDependencyServiceTest {
     }
 
     @Test
+    void shouldPropagateDependencyFailureWhenDependentTaskIsFailedByDependency() {
+        DefaultTaskDependencyService service = new DefaultTaskDependencyService(taskRepository, taskDependencyRepository);
+        LocalDateTime now = LocalDateTime.now();
+
+        SchedulerTask middleTask = new SchedulerTask();
+        middleTask.setId(201L);
+        middleTask.setStatus(TaskStatus.PENDING);
+        middleTask.setExecuteAt(now.minusSeconds(1));
+
+        SchedulerTask leafTask = new SchedulerTask();
+        leafTask.setId(202L);
+        leafTask.setStatus(TaskStatus.PENDING);
+        leafTask.setExecuteAt(now.minusSeconds(1));
+
+        when(taskDependencyRepository.findDependentTaskIds(11L)).thenReturn(List.of(201L));
+        when(taskRepository.findById(201L)).thenReturn(Optional.of(middleTask));
+        when(taskDependencyRepository.summarize(201L)).thenReturn(new TaskDependencySummary(1, 0, 1));
+        when(taskRepository.markFailedPendingByDependency(eq(201L), eq("DEPENDENCY_NOT_SATISFIED"), any(), eq(now)))
+                .thenReturn(true);
+
+        when(taskDependencyRepository.findDependentTaskIds(201L)).thenReturn(List.of(202L));
+        when(taskRepository.findById(202L)).thenReturn(Optional.of(leafTask));
+        when(taskDependencyRepository.summarize(202L)).thenReturn(new TaskDependencySummary(1, 0, 1));
+        when(taskRepository.markFailedPendingByDependency(eq(202L), eq("DEPENDENCY_NOT_SATISFIED"), any(), eq(now)))
+                .thenReturn(true);
+
+        List<SchedulerTask> queueTasks = service.onUpstreamTaskTerminal(11L, TaskStatus.FAILED, now);
+
+        assertTrue(queueTasks.isEmpty());
+        verify(taskDependencyRepository).updateByUpstreamTerminal(11L, TaskStatus.FAILED, now);
+        verify(taskDependencyRepository).updateByUpstreamTerminal(201L, TaskStatus.FAILED, now);
+        verify(taskRepository).markFailedPendingByDependency(eq(201L), eq("DEPENDENCY_NOT_SATISFIED"), any(), eq(now));
+        verify(taskRepository).markFailedPendingByDependency(eq(202L), eq("DEPENDENCY_NOT_SATISFIED"), any(), eq(now));
+    }
+
+    @Test
+    void shouldPromoteDependentTaskWhenItAcceptsDependencyFailure() {
+        DefaultTaskDependencyService service = new DefaultTaskDependencyService(taskRepository, taskDependencyRepository);
+        LocalDateTime now = LocalDateTime.now();
+
+        SchedulerTask middleTask = new SchedulerTask();
+        middleTask.setId(211L);
+        middleTask.setStatus(TaskStatus.PENDING);
+        middleTask.setExecuteAt(now.minusSeconds(1));
+
+        SchedulerTask leafTask = new SchedulerTask();
+        leafTask.setId(212L);
+        leafTask.setStatus(TaskStatus.PENDING);
+        leafTask.setExecuteAt(now.minusSeconds(1));
+
+        when(taskDependencyRepository.findDependentTaskIds(21L)).thenReturn(List.of(211L));
+        when(taskRepository.findById(211L)).thenReturn(Optional.of(middleTask));
+        when(taskDependencyRepository.summarize(211L)).thenReturn(new TaskDependencySummary(1, 0, 1));
+        when(taskRepository.markFailedPendingByDependency(eq(211L), eq("DEPENDENCY_NOT_SATISFIED"), any(), eq(now)))
+                .thenReturn(true);
+
+        when(taskDependencyRepository.findDependentTaskIds(211L)).thenReturn(List.of(212L));
+        when(taskRepository.findById(212L)).thenReturn(Optional.of(leafTask));
+        when(taskDependencyRepository.summarize(212L)).thenReturn(new TaskDependencySummary(1, 1, 0));
+        when(taskRepository.markRunnableIfPending(eq(212L), eq(now))).thenReturn(true);
+
+        List<SchedulerTask> queueTasks = service.onUpstreamTaskTerminal(21L, TaskStatus.FAILED, now);
+
+        assertEquals(1, queueTasks.size());
+        assertEquals(212L, queueTasks.getFirst().getId());
+        assertEquals(TaskStatus.RUNNABLE, queueTasks.getFirst().getStatus());
+        verify(taskDependencyRepository).updateByUpstreamTerminal(211L, TaskStatus.FAILED, now);
+        verify(taskRepository).markFailedPendingByDependency(eq(211L), eq("DEPENDENCY_NOT_SATISFIED"), any(), eq(now));
+        verify(taskRepository).markRunnableIfPending(eq(212L), eq(now));
+        verify(taskRepository, never()).markFailedPendingByDependency(eq(212L), any(), any(), any(LocalDateTime.class));
+    }
+
+    @Test
     void shouldSupportMultiLayerDependencyPropagationAcrossDifferentUpstreams() {
         DefaultTaskDependencyService service = new DefaultTaskDependencyService(taskRepository, taskDependencyRepository);
         LocalDateTime now = LocalDateTime.now();
