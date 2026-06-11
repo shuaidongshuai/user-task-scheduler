@@ -21,6 +21,8 @@ CREATE TABLE IF NOT EXISTS scheduler_task (
     max_retry_count INT NOT NULL DEFAULT 0 COMMENT '最大重试次数',
     execute_timeout_sec INT DEFAULT NULL COMMENT '任务执行超时时间（秒）',
     retry_delay_sec INT DEFAULT NULL COMMENT '单任务重试间隔（秒，为空则使用全局配置）',
+    max_wait_sec INT DEFAULT NULL COMMENT '任务最长等待调度时间（秒，为空表示不限时）',
+    wait_deadline_at DATETIME DEFAULT NULL COMMENT '等待调度超时截止时间，为空表示不限时',
 
     dispatcher_instance VARCHAR(128) DEFAULT NULL COMMENT '调度实例标识',
     worker_instance VARCHAR(128) DEFAULT NULL COMMENT '执行实例标识',
@@ -42,6 +44,7 @@ CREATE TABLE IF NOT EXISTS scheduler_task (
 
     INDEX idx_group_status_time (group_code, status, execute_at),
     INDEX idx_status_time (status, execute_at),
+    INDEX idx_status_wait_deadline (status, wait_deadline_at),
     INDEX idx_user_group_status (user_id, group_code, status),
     INDEX idx_heartbeat (status, heartbeat_time),
     INDEX idx_biz_type_biz_key (biz_type, biz_key)

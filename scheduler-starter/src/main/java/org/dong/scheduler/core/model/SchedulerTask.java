@@ -21,6 +21,8 @@ public class SchedulerTask {
     private int maxRetryCount;
     private Integer executeTimeoutSec;
     private Integer retryDelaySec;
+    private Integer maxWaitSec;
+    private LocalDateTime waitDeadlineAt;
     private String dispatcherInstance;
     private String workerInstance;
     private String workerThread;
@@ -44,6 +46,10 @@ public class SchedulerTask {
 
     public boolean due(LocalDateTime now) {
         return executeAt != null && !executeAt.isAfter(now);
+    }
+
+    public boolean waitingTimedOut(LocalDateTime now) {
+        return waitDeadlineAt != null && !waitDeadlineAt.isAfter(now);
     }
 
     public int retryDelaySec(int defaultRetryDelaySec) {

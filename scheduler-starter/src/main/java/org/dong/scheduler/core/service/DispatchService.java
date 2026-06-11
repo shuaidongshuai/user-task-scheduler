@@ -162,6 +162,18 @@ public class DispatchService {
                     continue;
                 }
 
+                if (task.waitingTimedOut(now)) {
+                    boolean failed = taskStateService.markFailedByWaitDeadline(task.getId(), now);
+                    queueRedisService.removeFromReady(cfg.getGroupCode(), taskId);
+                    progressed = true;
+                    skipped++;
+                    if (failed) {
+                        log.info("dispatch skipped timed out task before running, taskId={}, taskNo={}, group={}, user={}",
+                                task.getId(), task.getTaskNo(), task.getGroupCode(), task.getUserId());
+                    }
+                    continue;
+                }
+
                 BusinessTaskStateProvider stateProvider = businessTaskStateProviderRegistry.find(task.getBizType());
                 if (stateProvider != null) {
                     BusinessTaskState state = stateProvider.query(task);

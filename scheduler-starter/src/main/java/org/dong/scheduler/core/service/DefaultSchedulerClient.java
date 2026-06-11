@@ -29,6 +29,7 @@ import java.util.UUID;
 public class DefaultSchedulerClient implements SchedulerClient {
     private static final int MIN_PRIORITY = 0;
     private static final int MAX_PRIORITY = 99_999;
+    private static final String MAX_WAIT_ERROR = "maxWaitSec must be greater than 0";
 
     private final TaskRepository taskRepository;
     private final QueueRedisService queueRedisService;
@@ -112,6 +113,14 @@ public class DefaultSchedulerClient implements SchedulerClient {
         if (request.getRetryDelaySec() != null && request.getRetryDelaySec() < 0) {
             request.setRetryDelaySec(0);
         }
+        if (request.getMaxWaitSec() != null) {
+            if (request.getMaxWaitSec() <= 0) {
+                throw new IllegalArgumentException(MAX_WAIT_ERROR);
+            }
+            request.setWaitDeadlineAt(request.getExecuteAt().plusSeconds(request.getMaxWaitSec()));
+        } else {
+            request.setWaitDeadlineAt(null);
+        }
         if (request.getPriority() == null) {
             request.setPriority(0);
         } else if (request.getPriority() < MIN_PRIORITY) {
@@ -175,6 +184,7 @@ public class DefaultSchedulerClient implements SchedulerClient {
                     .setMaxRetryCount(task.getMaxRetryCount())
                     .setExecuteTimeoutSec(task.getExecuteTimeoutSec())
                     .setRetryDelaySec(task.getRetryDelaySec())
+                    .setMaxWaitSec(task.getMaxWaitSec())
                     .setExtInfo(task.getExtInfo())
                     .setDependencies(List.of()));
             List<BatchSubmitDependencyRequest> dependencies = normalizeBatchDependencies(ref, task.getDependencies());

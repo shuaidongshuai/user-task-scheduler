@@ -36,6 +36,10 @@ public final class RedisKeys {
         return "sched:reconcile:lock";
     }
 
+    public static String jobLock(String jobName) {
+        return "sched:job:lock:" + jobName;
+    }
+
     public static String groupReconcileThrottle(String group) {
         return "sched:reconcile:throttle:" + group;
     }

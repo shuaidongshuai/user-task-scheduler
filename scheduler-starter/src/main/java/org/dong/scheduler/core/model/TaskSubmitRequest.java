@@ -60,6 +60,14 @@ public class TaskSubmitRequest {
      */
     private Integer retryDelaySec;
     /**
+     * 单任务最长等待时间（秒），从 executeAt 开始计算；为空表示不限时。
+     */
+    private Integer maxWaitSec;
+    /**
+     * 等待超时截止时间，通常由 executeAt + maxWaitSec 计算得到；为空表示不限时。
+     */
+    private LocalDateTime waitDeadlineAt;
+    /**
      * 扩展信息（字符串），可选。
      */
     private String extInfo;

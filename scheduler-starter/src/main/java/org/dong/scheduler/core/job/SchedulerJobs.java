@@ -8,6 +8,8 @@ import org.dong.scheduler.core.service.RecoveryService;
 
 @Slf4j
 public class SchedulerJobs {
+    private static final String RECOVER_JOB = "recover";
+
     private final DispatchService dispatchService;
     private final RecoveryService recoveryService;
     private final GroupConfigRepository groupConfigRepository;
@@ -41,6 +43,17 @@ public class SchedulerJobs {
         log.debug("scheduler dispatch job end, costMs={}", System.currentTimeMillis() - begin);
     }
 
+    public void expireWaitingTasks() {
+        long begin = System.currentTimeMillis();
+        log.debug("scheduler expire waiting job start");
+        int expired = recoveryService.expireWaitingTasks();
+        if (expired > 0) {
+            log.info("scheduler expire waiting job end, expired={}, costMs={}", expired, System.currentTimeMillis() - begin);
+        } else {
+            log.debug("scheduler expire waiting job end, expired=0, costMs={}", System.currentTimeMillis() - begin);
+        }
+    }
+
     /**
      * 恢复超时运行的任务
      * <p>
@@ -50,24 +63,27 @@ public class SchedulerJobs {
     public void recover() {
         long begin = System.currentTimeMillis();
         log.debug("scheduler recover job start");
-        var groups = groupConfigRepository.listEnabled();
-        int totalRecovered = 0;
-        for (GroupConfig cfg : groups) {
-            try {
-                totalRecovered += recoveryService.recoverTimeoutRunning(cfg.getGroupCode(), cfg.getHeartbeatTimeoutSec());
-            } catch (Exception e) {
-                log.error("recover failed, group={}", cfg.getGroupCode(), e);
+        recoveryService.runWithScheduledJobLock(RECOVER_JOB, "recovery scan", () -> {
+            var groups = groupConfigRepository.listEnabled();
+            int totalRecovered = 0;
+            for (GroupConfig cfg : groups) {
+                try {
+                    totalRecovered += recoveryService.recoverTimeoutRunning(cfg.getGroupCode(), cfg.getHeartbeatTimeoutSec());
+                } catch (Exception e) {
+                    log.error("recover failed, group={}", cfg.getGroupCode(), e);
+                }
             }
-        }
-        int totalReconciledGroups = recoveryService.reconcileRunningCountersIfNeeded(
-                groups.stream().map(GroupConfig::getGroupCode).toList()
-        );
-        if (totalRecovered > 0 || totalReconciledGroups > 0) {
-            log.info("scheduler recover job end, recovered={}, reconciledGroups={}, costMs={}",
-                    totalRecovered, totalReconciledGroups, System.currentTimeMillis() - begin);
-        } else {
-            log.debug("scheduler recover job end, recovered=0, reconciledGroups=0, costMs={}", System.currentTimeMillis() - begin);
-        }
+            int totalReconciledGroups = recoveryService.reconcileRunningCountersIfNeeded(
+                    groups.stream().map(GroupConfig::getGroupCode).toList()
+            );
+            if (totalRecovered > 0 || totalReconciledGroups > 0) {
+                log.info("scheduler recover job end, recovered={}, reconciledGroups={}, costMs={}",
+                        totalRecovered, totalReconciledGroups, System.currentTimeMillis() - begin);
+            } else {
+                log.debug("scheduler recover job end, recovered=0, reconciledGroups=0, costMs={}",
+                        System.currentTimeMillis() - begin);
+            }
+        });
     }
 
     /**

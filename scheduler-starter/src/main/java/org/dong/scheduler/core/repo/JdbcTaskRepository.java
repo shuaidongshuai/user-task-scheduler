@@ -33,9 +33,9 @@ public class JdbcTaskRepository implements TaskRepository {
                     insert into scheduler_task(
                         task_no, group_code, user_id, biz_type, biz_key,
                         status, priority, execute_at, next_retry_at,
-                        retry_count, max_retry_count, execute_timeout_sec, retry_delay_sec,
+                        retry_count, max_retry_count, execute_timeout_sec, retry_delay_sec, max_wait_sec, wait_deadline_at,
                         version, ext_info, create_time, update_time
-                    ) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,now(),now())
+                    ) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,now(),now())
                     """, Statement.RETURN_GENERATED_KEYS);
             ps.setString(1, taskNo);
             ps.setString(2, request.getGroupCode());
@@ -58,8 +58,18 @@ public class JdbcTaskRepository implements TaskRepository {
             } else {
                 ps.setInt(13, request.getRetryDelaySec());
             }
-            ps.setInt(14, 0);
-            ps.setString(15, extInfo);
+            if (request.getMaxWaitSec() == null) {
+                ps.setObject(14, null);
+            } else {
+                ps.setInt(14, request.getMaxWaitSec());
+            }
+            if (request.getWaitDeadlineAt() == null) {
+                ps.setTimestamp(15, null);
+            } else {
+                ps.setTimestamp(15, Timestamp.valueOf(request.getWaitDeadlineAt()));
+            }
+            ps.setInt(16, 0);
+            ps.setString(17, extInfo);
             return ps;
         }, keyHolder);
         return Objects.requireNonNull(keyHolder.getKey()).longValue();
@@ -117,6 +127,16 @@ public class JdbcTaskRepository implements TaskRepository {
                    set status='FAILED', finish_time=?, error_code=?, error_msg=?, update_time=now(), version=version+1
                  where id=? and status in ('RUNNING','WAIT_RETRY','RUNNABLE')
                 """, Timestamp.valueOf(now), errorCode, errorMsg, id) > 0;
+    }
+
+    @Override
+    public boolean markFailedByWaitDeadline(Long id, String errorCode, String errorMsg, LocalDateTime now) {
+        return jdbcTemplate.update("""
+                update scheduler_task
+                   set status='FAILED', finish_time=?, error_code=?, error_msg=?, update_time=now(), version=version+1
+                 where id=? and status in ('PENDING','RUNNABLE','WAIT_RETRY')
+                   and wait_deadline_at is not null and wait_deadline_at <= ?
+                """, Timestamp.valueOf(now), errorCode, errorMsg, id, Timestamp.valueOf(now)) > 0;
     }
 
     @Override
@@ -192,6 +212,18 @@ public class JdbcTaskRepository implements TaskRepository {
                  where status in ('RUNNABLE','WAIT_RETRY')
                  order by execute_at asc limit ?
                 """, this::mapTask, limit);
+    }
+
+    @Override
+    public List<Long> findWaitingTimeoutTaskIds(LocalDateTime now, int limit) {
+        return jdbcTemplate.query("""
+                select id from scheduler_task
+                 where status in ('PENDING','RUNNABLE','WAIT_RETRY')
+                   and wait_deadline_at is not null
+                   and wait_deadline_at <= ?
+                 order by wait_deadline_at asc
+                 limit ?
+                """, (rs, rowNum) -> rs.getLong(1), Timestamp.valueOf(now), limit);
     }
 
     @Override
@@ -309,6 +341,8 @@ public class JdbcTaskRepository implements TaskRepository {
         task.setMaxRetryCount(rs.getInt("max_retry_count"));
         task.setExecuteTimeoutSec((Integer) rs.getObject("execute_timeout_sec"));
         task.setRetryDelaySec((Integer) rs.getObject("retry_delay_sec"));
+        task.setMaxWaitSec((Integer) rs.getObject("max_wait_sec"));
+        task.setWaitDeadlineAt(tsToLdt(rs.getTimestamp("wait_deadline_at")));
         task.setDispatcherInstance(rs.getString("dispatcher_instance"));
         task.setWorkerInstance(rs.getString("worker_instance"));
         task.setWorkerThread(rs.getString("worker_thread"));

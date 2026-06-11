@@ -2,6 +2,7 @@ package org.dong.scheduler.core.service;
 
 import org.dong.scheduler.config.SchedulerProperties;
 import org.dong.scheduler.core.enums.DependencyTargetState;
+import org.dong.scheduler.core.model.SchedulerTask;
 import org.dong.scheduler.core.model.TaskDependencyRequest;
 import org.dong.scheduler.core.model.TaskSubmitRequest;
 import org.dong.scheduler.core.model.batch.BatchSubmitDependencyRequest;
@@ -19,10 +20,12 @@ import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -157,5 +160,68 @@ class DefaultSchedulerClientTest {
         assertEquals("g1", commands.get(1).request().getGroupCode());
         assertEquals(0, commands.get(1).request().getMaxRetryCount());
         assertEquals(0, commands.get(1).request().getRetryDelaySec());
+    }
+
+    @Test
+    void shouldRejectNonPositiveMaxWaitSecOnSingleSubmit() {
+        TaskSubmitRequest request = new TaskSubmitRequest()
+                .setUserId("u1")
+                .setBizType("demo.biz")
+                .setBizKey("biz-a")
+                .setExecuteAt(LocalDateTime.now())
+                .setMaxWaitSec(0);
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, () -> schedulerClient.submit(request));
+
+        assertEquals("maxWaitSec must be greater than 0", ex.getMessage());
+    }
+
+    @Test
+    void shouldCalculateWaitDeadlineFromExecuteAtOnSingleSubmit() {
+        LocalDateTime executeAt = LocalDateTime.of(2026, 6, 12, 12, 0, 0);
+        TaskSubmitRequest request = new TaskSubmitRequest()
+                .setUserId("u1")
+                .setBizType("demo.biz")
+                .setBizKey("biz-wait-single")
+                .setExecuteAt(executeAt)
+                .setMaxWaitSec(600);
+        SchedulerTask task = new SchedulerTask();
+        task.setId(101L);
+        task.setTaskNo("task-101");
+        task.setStatus(org.dong.scheduler.core.enums.TaskStatus.PENDING);
+        task.setExecuteAt(executeAt);
+        when(taskStateService.submit(org.mockito.ArgumentMatchers.anyString(), org.mockito.ArgumentMatchers.any(TaskSubmitRequest.class)))
+                .thenReturn(101L);
+        when(taskRepository.findById(101L)).thenReturn(Optional.of(task));
+
+        schedulerClient.submit(request);
+
+        ArgumentCaptor<TaskSubmitRequest> captor = ArgumentCaptor.forClass(TaskSubmitRequest.class);
+        verify(taskStateService).submit(org.mockito.ArgumentMatchers.anyString(), captor.capture());
+        assertEquals(executeAt.plusSeconds(600), captor.getValue().getWaitDeadlineAt());
+    }
+
+    @Test
+    void shouldCalculateWaitDeadlineFromExecuteAtOnBatchSubmit() {
+        LocalDateTime executeAt = LocalDateTime.of(2026, 6, 12, 12, 0, 0);
+        BatchSubmitRequest request = new BatchSubmitRequest(List.of(
+                new BatchSubmitTaskRequest()
+                        .setClientTaskRef("A")
+                        .setUserId("u1")
+                        .setBizType("demo.biz")
+                        .setBizKey("biz-a")
+                        .setExecuteAt(executeAt)
+                        .setMaxWaitSec(300)
+                        .setDependencies(List.of())
+        ));
+        when(taskStateService.submitBatch(anyList())).thenReturn(List.of(
+                new BatchSubmitResultItem("A", 101L, "task-a")
+        ));
+
+        schedulerClient.submitBatch(request);
+
+        ArgumentCaptor<List<TaskStateService.BatchSubmitCommand>> captor = ArgumentCaptor.forClass(List.class);
+        verify(taskStateService).submitBatch(captor.capture());
+        assertEquals(executeAt.plusSeconds(300), captor.getValue().getFirst().request().getWaitDeadlineAt());
     }
 }

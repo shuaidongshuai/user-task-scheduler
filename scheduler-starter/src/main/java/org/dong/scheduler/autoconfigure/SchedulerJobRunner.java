@@ -22,6 +22,14 @@ public class SchedulerJobRunner {
         ThreadContextUtil.addNewContext(jobs::dispatch).run();
     }
 
+    @Scheduled(fixedDelayString = "${utask.scheduler.wait-timeout-scan-interval-ms:1000}")
+    public void expireWaitingTasks() {
+        if (!properties.isDispatchEnabled()) {
+            return;
+        }
+        ThreadContextUtil.addNewContext(jobs::expireWaitingTasks).run();
+    }
+
     @Scheduled(fixedDelayString = "${utask.scheduler.recovery-interval-ms:30000}")
     public void recover() {
         if (!properties.isDispatchEnabled()) {

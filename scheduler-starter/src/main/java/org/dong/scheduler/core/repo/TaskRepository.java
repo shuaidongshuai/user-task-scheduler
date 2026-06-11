@@ -24,6 +24,8 @@ public interface TaskRepository {
 
     boolean markFailed(Long id, String errorCode, String errorMsg, LocalDateTime now);
 
+    boolean markFailedByWaitDeadline(Long id, String errorCode, String errorMsg, LocalDateTime now);
+
     boolean markFailedPendingByDependency(Long id, String errorCode, String errorMsg, LocalDateTime now);
 
     boolean markWaitRetry(Long id, LocalDateTime nextRetryAt, String errorCode, String errorMsg, LocalDateTime now);
@@ -39,6 +41,8 @@ public interface TaskRepository {
     List<SchedulerTask> findRunningHeartbeatTimeout(String groupCode, LocalDateTime cutoff, int limit);
 
     List<SchedulerTask> findRunnableForQueueRefill(LocalDateTime now, int limit);
+
+    List<Long> findWaitingTimeoutTaskIds(LocalDateTime now, int limit);
 
     void promotePendingToRunnable(LocalDateTime now, int limit);
 

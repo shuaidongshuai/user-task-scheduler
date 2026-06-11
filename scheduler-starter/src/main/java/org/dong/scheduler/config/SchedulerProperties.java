@@ -21,6 +21,7 @@ public class SchedulerProperties {
     private int defaultGroupLockExpireSec = 120;
     private String defaultGroupDescription = "auto initialized default public group";
     private long dispatchIntervalMs = 500;
+    private long waitTimeoutScanIntervalMs = 1000;
     private long recoveryIntervalMs = 30_000;
     private long queueRefillIntervalMs = 15_000;
     private int recoveryScanLimit = 200;
@@ -37,6 +38,11 @@ public class SchedulerProperties {
     private int defaultExecuteTimeoutSec = 600;
     private int timeoutInterruptGraceSec = 5;
     private int reconcileLockSec = 30;
+    /**
+     * Distributed lock ttl for scheduled jobs like expire/recover/refill.
+     * Should be larger than the slowest expected single scan duration.
+     */
+    private int scheduledJobLockSec = 60;
     private int immediateReconcileThrottleSec = 3;
     private String instanceId;
 }

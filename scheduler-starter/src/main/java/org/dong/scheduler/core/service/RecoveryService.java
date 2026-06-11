@@ -15,6 +15,10 @@ import java.util.UUID;
 
 @Slf4j
 public class RecoveryService {
+    private static final String EXPIRE_WAITING_JOB = "expire-waiting";
+    private static final String RECOVER_JOB = "recover";
+    private static final String REFILL_JOB = "refill-queue";
+
     private final SchedulerProperties properties;
     private final TaskRepository taskRepository;
     private final ConcurrencyGuard concurrencyGuard;
@@ -89,39 +93,50 @@ public class RecoveryService {
         return recovered;
     }
 
-    public int refillQueue() {
-        LocalDateTime now = LocalDateTime.now();
-        taskRepository.promotePendingToRunnable(now, properties.getQueueRefillLimit());
-        List<SchedulerTask> list = taskRepository.findRunnableForQueueRefill(now, properties.getQueueRefillLimit());
-        int refillTime = 0;
-        int refillReady = 0;
-        for (SchedulerTask task : list) {
-            if (task.getExecuteAt().isAfter(now)) {
-                if (!queueRedisService.existsInTime(task.getGroupCode(), task.getId())) {
-                    queueRedisService.enqueue(task);
-                    refillTime++;
-                    log.info("queue refill task enqueued to time queue, taskId={}, taskNo={}, group={}, user={}, bizType={}, bizKey={}, executeAt={}, status={}",
-                            task.getId(), task.getTaskNo(), task.getGroupCode(), task.getUserId(), task.getBizType(),
-                            task.getBizKey(), task.getExecuteAt(), task.getStatus());
-                }
-                continue;
-            }
+    public int expireWaitingTasks() {
+        ScheduledJobResult result = new ScheduledJobResult();
+        runWithScheduledJobLock(EXPIRE_WAITING_JOB, "waiting timeout scan",
+                () -> result.value = taskStateService.expireWaitingTasks(properties.getRecoveryScanLimit(), LocalDateTime.now()));
+        return result.value;
+    }
 
-            if (!queueRedisService.existsInReady(task.getGroupCode(), task.getId())) {
-                queueRedisService.addToReady(task);
-                refillReady++;
-                log.info("queue refill task added to ready queue, taskId={}, taskNo={}, group={}, user={}, bizType={}, bizKey={}, executeAt={}, priority={}, status={}",
-                        task.getId(), task.getTaskNo(), task.getGroupCode(), task.getUserId(), task.getBizType(),
-                        task.getBizKey(), task.getExecuteAt(), task.getPriority(), task.getStatus());
+    public int refillQueue() {
+        ScheduledJobResult result = new ScheduledJobResult();
+        runWithScheduledJobLock(REFILL_JOB, "queue refill", () -> {
+            LocalDateTime now = LocalDateTime.now();
+            taskRepository.promotePendingToRunnable(now, properties.getQueueRefillLimit());
+            List<SchedulerTask> list = taskRepository.findRunnableForQueueRefill(now, properties.getQueueRefillLimit());
+            int refillTime = 0;
+            int refillReady = 0;
+            for (SchedulerTask task : list) {
+                if (task.getExecuteAt().isAfter(now)) {
+                    if (!queueRedisService.existsInTime(task.getGroupCode(), task.getId())) {
+                        queueRedisService.enqueue(task);
+                        refillTime++;
+                        log.info("queue refill task enqueued to time queue, taskId={}, taskNo={}, group={}, user={}, bizType={}, bizKey={}, executeAt={}, status={}",
+                                task.getId(), task.getTaskNo(), task.getGroupCode(), task.getUserId(), task.getBizType(),
+                                task.getBizKey(), task.getExecuteAt(), task.getStatus());
+                    }
+                    continue;
+                }
+
+                if (!queueRedisService.existsInReady(task.getGroupCode(), task.getId())) {
+                    queueRedisService.addToReady(task);
+                    refillReady++;
+                    log.info("queue refill task added to ready queue, taskId={}, taskNo={}, group={}, user={}, bizType={}, bizKey={}, executeAt={}, priority={}, status={}",
+                            task.getId(), task.getTaskNo(), task.getGroupCode(), task.getUserId(), task.getBizType(),
+                            task.getBizKey(), task.getExecuteAt(), task.getPriority(), task.getStatus());
+                }
+                queueRedisService.removeFromTime(task.getGroupCode(), task.getId());
             }
-            queueRedisService.removeFromTime(task.getGroupCode(), task.getId());
-        }
-        if (refillTime > 0 || refillReady > 0) {
-            log.info("queue refill done, scanned={}, refillTime={}, refillReady={}", list.size(), refillTime, refillReady);
-        } else {
-            log.debug("queue refill no-op, scanned={}", list.size());
-        }
-        return refillTime + refillReady;
+            if (refillTime > 0 || refillReady > 0) {
+                log.info("queue refill done, scanned={}, refillTime={}, refillReady={}", list.size(), refillTime, refillReady);
+            } else {
+                log.debug("queue refill no-op, scanned={}", list.size());
+            }
+            result.value = refillTime + refillReady;
+        });
+        return result.value;
     }
 
     public int reconcileRunningCountersIfNeeded(List<String> groupCodes) {
@@ -169,6 +184,24 @@ public class RecoveryService {
         } finally {
             concurrencyGuard.releaseReconcileLock(owner);
         }
+    }
+
+    public void runWithScheduledJobLock(String jobName, String jobDesc, Runnable work) {
+        String owner = properties.getInstanceId() + ":" + UUID.randomUUID();
+        boolean locked = concurrencyGuard.tryAcquireJobLock(jobName, owner, properties.getScheduledJobLockSec());
+        if (!locked) {
+            log.debug("skip {}, lock held by another instance", jobDesc);
+            return;
+        }
+        try {
+            work.run();
+        } finally {
+            concurrencyGuard.releaseJobLock(jobName, owner);
+        }
+    }
+
+    private static final class ScheduledJobResult {
+        private int value;
     }
 
     private boolean reconcileRunningCountersForGroup(String groupCode) {

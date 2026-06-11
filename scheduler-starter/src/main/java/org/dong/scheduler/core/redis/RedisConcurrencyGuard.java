@@ -253,6 +253,14 @@ public class RedisConcurrencyGuard implements ConcurrencyGuard {
     }
 
     @Override
+    public boolean tryAcquireJobLock(String jobName, String owner, int lockSec) {
+        Boolean ok = redisTemplate.opsForValue().setIfAbsent(
+                RedisKeys.jobLock(jobName), owner, Duration.ofSeconds(Math.max(1, lockSec))
+        );
+        return Boolean.TRUE.equals(ok);
+    }
+
+    @Override
     public boolean tryAcquireGroupReconcileThrottle(String groupCode, int throttleSec) {
         Boolean ok = redisTemplate.opsForValue().setIfAbsent(
                 RedisKeys.groupReconcileThrottle(groupCode),
@@ -267,6 +275,15 @@ public class RedisConcurrencyGuard implements ConcurrencyGuard {
         redisTemplate.execute(connection -> connection.scriptingCommands().eval(
                 RELEASE_RECONCILE_LOCK_SCRIPT.getBytes(StandardCharsets.UTF_8), ReturnType.INTEGER, 1,
                 RedisKeys.reconcileLock().getBytes(StandardCharsets.UTF_8),
+                owner.getBytes(StandardCharsets.UTF_8)
+        ), true);
+    }
+
+    @Override
+    public void releaseJobLock(String jobName, String owner) {
+        redisTemplate.execute(connection -> connection.scriptingCommands().eval(
+                RELEASE_RECONCILE_LOCK_SCRIPT.getBytes(StandardCharsets.UTF_8), ReturnType.INTEGER, 1,
+                RedisKeys.jobLock(jobName).getBytes(StandardCharsets.UTF_8),
                 owner.getBytes(StandardCharsets.UTF_8)
         ), true);
     }

@@ -65,6 +65,10 @@ public class BatchSubmitTaskRequest {
      */
     private Integer retryDelaySec;
     /**
+     * 单任务最长等待时间（秒），从 executeAt 开始计算；为空表示不限时。
+     */
+    private Integer maxWaitSec;
+    /**
      * 扩展信息（字符串），可选。
      */
     private String extInfo;

@@ -17,6 +17,9 @@ import java.util.List;
 import java.util.Map;
 
 public class TaskStateService {
+    private static final String WAIT_TIMEOUT_ERROR_CODE = "SCHEDULE_WAIT_TIMEOUT";
+    private static final String WAIT_TIMEOUT_ERROR_MSG = "task exceeded max wait before running";
+
     private final TaskRepository taskRepository;
     private final TaskDependencyService taskDependencyService;
     private final QueueRedisService queueRedisService;
@@ -143,8 +146,28 @@ public class TaskStateService {
         return transitionTerminal(taskId, now, () -> taskRepository.markFailed(taskId, errorCode, errorMsg, now), TaskStatus.FAILED);
     }
 
+    public boolean markFailedByWaitDeadline(Long taskId, LocalDateTime now) {
+        return transitionTerminal(
+                taskId,
+                now,
+                () -> taskRepository.markFailedByWaitDeadline(taskId, WAIT_TIMEOUT_ERROR_CODE, WAIT_TIMEOUT_ERROR_MSG, now),
+                TaskStatus.FAILED
+        );
+    }
+
     public boolean markTerminalByBusinessState(Long taskId, TaskStatus status, LocalDateTime now) {
         return transitionTerminal(taskId, now, () -> taskRepository.markTerminalByBusinessState(taskId, status, now), status);
+    }
+
+    public int expireWaitingTasks(int limit, LocalDateTime now) {
+        List<Long> taskIds = taskRepository.findWaitingTimeoutTaskIds(now, limit);
+        int expired = 0;
+        for (Long taskId : taskIds) {
+            if (markFailedByWaitDeadline(taskId, now)) {
+                expired++;
+            }
+        }
+        return expired;
     }
 
     private boolean transitionTerminal(Long taskId,

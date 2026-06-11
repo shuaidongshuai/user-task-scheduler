@@ -190,6 +190,31 @@ class DispatchServiceTest {
         verify(workerService).submit(second, group, "exec-202");
     }
 
+    @Test
+    void shouldFailTimedOutTaskBeforeDispatchingToWorker() {
+        GroupConfig group = new GroupConfig();
+        group.setGroupCode("g1");
+        group.setEnabled(true);
+        group.setMaxConcurrency(2);
+        group.setDispatchBatchSize(1);
+
+        SchedulerTask timedOut = runnableTask(501L, "u1");
+        timedOut.setWaitDeadlineAt(LocalDateTime.now().minusSeconds(1));
+
+        when(groupConfigRepository.listEnabled()).thenReturn(List.of(group));
+        when(queueRedisService.promoteDueTasks(eq("g1"), anyLong(), eq(1))).thenReturn(List.of());
+        when(concurrencyGuard.groupRunning("g1")).thenReturn(0L);
+        when(queueRedisService.peekReady("g1", 0, 1)).thenReturn(List.of(501L), List.of());
+        when(taskRepository.findById(501L)).thenReturn(Optional.of(timedOut));
+        when(taskStateService.markFailedByWaitDeadline(eq(501L), any(LocalDateTime.class))).thenReturn(true);
+
+        dispatchService.dispatchOnce();
+
+        verify(taskStateService).markFailedByWaitDeadline(eq(501L), any(LocalDateTime.class));
+        verify(queueRedisService).removeFromReady("g1", 501L);
+        verify(workerService, never()).submit(any(), eq(group), any());
+    }
+
     private SchedulerTask runnableTask(long id, String userId) {
         SchedulerTask task = new SchedulerTask();
         task.setId(id);

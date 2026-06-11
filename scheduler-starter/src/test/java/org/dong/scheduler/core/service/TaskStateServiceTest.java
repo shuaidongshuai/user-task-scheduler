@@ -222,4 +222,28 @@ class TaskStateServiceTest {
         verify(queueRedisService, never()).addToReady(any());
         verify(queueRedisService, never()).enqueue(any());
     }
+
+    @Test
+    void shouldExpireWaitingTasksAndTriggerDependencyRefresh() {
+        LocalDateTime now = LocalDateTime.now();
+        SchedulerTask downstream = new SchedulerTask();
+        downstream.setId(301L);
+        downstream.setGroupCode("g1");
+        downstream.setStatus(TaskStatus.RUNNABLE);
+        downstream.setExecuteAt(now.minusSeconds(1));
+
+        when(taskRepository.findWaitingTimeoutTaskIds(now, 100)).thenReturn(List.of(201L));
+        when(taskRepository.markFailedByWaitDeadline(
+                201L,
+                "SCHEDULE_WAIT_TIMEOUT",
+                "task exceeded max wait before running",
+                now
+        )).thenReturn(true);
+        when(taskDependencyService.onUpstreamTaskTerminal(201L, TaskStatus.FAILED, now)).thenReturn(List.of(downstream));
+
+        int expired = taskStateService.expireWaitingTasks(100, now);
+
+        assertEquals(1, expired);
+        verify(queueRedisService).addToReady(downstream);
+    }
 }

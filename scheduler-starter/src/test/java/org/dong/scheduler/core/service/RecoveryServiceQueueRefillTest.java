@@ -16,6 +16,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
@@ -40,6 +41,8 @@ class RecoveryServiceQueueRefillTest {
     @BeforeEach
     void setUp() {
         properties = new SchedulerProperties();
+        properties.setInstanceId("ins-test");
+        properties.setScheduledJobLockSec(10);
         properties.setQueueRefillLimit(500);
         recoveryService = new RecoveryService(properties, taskRepository, concurrencyGuard, queueRedisService, taskStateService);
     }
@@ -58,6 +61,7 @@ class RecoveryServiceQueueRefillTest {
         task.setStatus(TaskStatus.RUNNABLE);
         task.setExecuteAt(now.minusSeconds(5));
 
+        when(concurrencyGuard.tryAcquireJobLock(eq("refill-queue"), any(), eq(10))).thenReturn(true);
         when(taskRepository.findRunnableForQueueRefill(any(LocalDateTime.class), eq(500))).thenReturn(List.of(task));
         when(queueRedisService.existsInReady("g1", 301L)).thenReturn(false);
 
@@ -68,6 +72,7 @@ class RecoveryServiceQueueRefillTest {
         verify(queueRedisService).addToReady(task);
         verify(queueRedisService).removeFromTime("g1", 301L);
         verify(queueRedisService, never()).enqueue(task);
+        verify(concurrencyGuard).releaseJobLock(eq("refill-queue"), any());
     }
 
     @Test
@@ -84,6 +89,7 @@ class RecoveryServiceQueueRefillTest {
         task.setStatus(TaskStatus.RUNNABLE);
         task.setExecuteAt(now.plusMinutes(1));
 
+        when(concurrencyGuard.tryAcquireJobLock(eq("refill-queue"), any(), eq(10))).thenReturn(true);
         when(taskRepository.findRunnableForQueueRefill(any(LocalDateTime.class), eq(500))).thenReturn(List.of(task));
         when(queueRedisService.existsInTime("g1", 302L)).thenReturn(false);
 
@@ -94,5 +100,18 @@ class RecoveryServiceQueueRefillTest {
         verify(queueRedisService).enqueue(task);
         verify(queueRedisService, never()).addToReady(task);
         verify(queueRedisService, never()).removeFromTime("g1", 302L);
+        verify(concurrencyGuard).releaseJobLock(eq("refill-queue"), any());
+    }
+
+    @Test
+    void shouldSkipRefillQueueWhenJobLockBusy() {
+        when(concurrencyGuard.tryAcquireJobLock(eq("refill-queue"), any(), anyInt())).thenReturn(false);
+
+        int refilled = recoveryService.refillQueue();
+
+        assertEquals(0, refilled);
+        verify(taskRepository, never()).promotePendingToRunnable(any(LocalDateTime.class), anyInt());
+        verify(taskRepository, never()).findRunnableForQueueRefill(any(LocalDateTime.class), anyInt());
+        verify(concurrencyGuard, never()).releaseJobLock(eq("refill-queue"), any());
     }
 }
