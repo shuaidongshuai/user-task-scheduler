@@ -25,6 +25,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class DispatchService {
     private static final ZoneId SYSTEM_ZONE = ZoneId.systemDefault();
     private static final int SUMMARY_LOG_EVERY_N = 5;
+    private static final int MAX_READY_SCAN_PAGES = 100;
 
     private final SchedulerProperties properties;
     private final GroupConfigRepository groupConfigRepository;
@@ -124,7 +125,8 @@ public class DispatchService {
         int dispatched = 0;
         int skipped = 0;
         int readyScanned = 0;
-        while (groupRunning < cfg.getMaxConcurrency()) {
+        int readyScanPages = 0;
+        while (groupRunning < cfg.getMaxConcurrency() && readyScanPages < MAX_READY_SCAN_PAGES) {
             groupRunning = concurrencyGuard.groupRunning(cfg.getGroupCode());
             if (groupRunning >= cfg.getMaxConcurrency()) {
                 break;
@@ -134,6 +136,7 @@ public class DispatchService {
             if (ready == null || ready.isEmpty()) {
                 break;
             }
+            readyScanPages++;
             readyScanned += ready.size();
             boolean progressed = false;
             for (Long taskId : ready) {
@@ -281,7 +284,8 @@ public class DispatchService {
                         queueRedisService.enqueue(task);
                     }
                     skipped++;
-                    log.error("dispatch submit failed and rolled back, taskId={}, taskNo={}, executeNo={}, rollback={}, nextCheckAt={}",
+                    log.warn("dispatch submit rejected and rolled back by worker pool capacity, taskId={}, taskNo={}, "
+                                    + "executeNo={}, rollback={}, nextCheckAt={}",
                             task.getId(), task.getTaskNo(), executeNo, rollback, nextCheckAt, ex);
                 }
             }
@@ -292,16 +296,23 @@ public class DispatchService {
             }
         }
 
+        if (readyScanPages >= MAX_READY_SCAN_PAGES && groupRunning < cfg.getMaxConcurrency()) {
+            log.warn("dispatch ready scan page limit reached, group={}, readyScanPages={}, pageSize={}, readyScanned={}, "
+                            + "dispatched={}, skipped={}, saturatedUsers={}, groupRunning={}, groupMax={}",
+                    cfg.getGroupCode(), readyScanPages, pageSize, readyScanned, dispatched, skipped,
+                    saturatedUsers.size(), groupRunning, cfg.getMaxConcurrency());
+        }
+
         if (dispatched > 0 || groupRunning > 0) {
             AtomicInteger counter = groupSummaryLogCounter.computeIfAbsent(cfg.getGroupCode(), key -> new AtomicInteger(0));
             int current = counter.incrementAndGet();
             if (current % SUMMARY_LOG_EVERY_N != 0) {
                 return;
             }
-            log.info("dispatch group summary, group={}, promoted={}, readyScanned={}, pageSize={}, dispatched={}, skipped={}, "
-                            + "saturatedUsers={}, groupRunning={}, costMs={}",
-                    cfg.getGroupCode(), promoted, readyScanned, pageSize, dispatched, skipped, saturatedUsers.size(),
-                    groupRunning, System.currentTimeMillis() - begin);
+            log.info("dispatch group summary, group={}, promoted={}, readyScanPages={}, readyScanned={}, pageSize={}, "
+                            + "dispatched={}, skipped={}, saturatedUsers={}, groupRunning={}, costMs={}",
+                    cfg.getGroupCode(), promoted, readyScanPages, readyScanned, pageSize, dispatched, skipped,
+                    saturatedUsers.size(), groupRunning, System.currentTimeMillis() - begin);
         }
     }
 

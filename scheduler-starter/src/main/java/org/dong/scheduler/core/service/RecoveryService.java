@@ -174,16 +174,19 @@ public class RecoveryService {
     private boolean reconcileRunningCountersForGroup(String groupCode) {
         long dbGroupRunning = taskRepository.countRunningByGroup(groupCode);
         long redisGroupRunning = concurrencyGuard.groupRunning(groupCode);
-        if (redisGroupRunning <= dbGroupRunning) {
-            if (redisGroupRunning < dbGroupRunning) {
-                log.warn("running counter drift detected but skipped (redis<db), group={}, redisGroupRunning={}, dbGroupRunning={}",
-                        groupCode, redisGroupRunning, dbGroupRunning);
-            }
+        Map<String, Long> dbUserRunning = taskRepository.countRunningByUserInGroup(groupCode);
+        if (redisGroupRunning < dbGroupRunning) {
+            concurrencyGuard.syncRunningCounters(groupCode, dbGroupRunning, dbUserRunning);
+            long redisGroupAfter = concurrencyGuard.groupRunning(groupCode);
+            log.warn("running counters rebuilt (redis<db), group={}, redisGroupBefore={}, dbGroup={}, redisGroupAfter={}, dbUserRunning={}",
+                    groupCode, redisGroupRunning, dbGroupRunning, redisGroupAfter, dbUserRunning);
+            return true;
+        }
+        if (redisGroupRunning == dbGroupRunning) {
             return false;
         }
 
-        // Global reconcile baseline: only fix overflow (redis > db).
-        Map<String, Long> dbUserRunning = taskRepository.countRunningByUserInGroup(groupCode);
+        // Global reconcile baseline: fix overflow (redis > db).
         long remaining = redisGroupRunning - dbGroupRunning;
         long originalRemaining = remaining;
 
@@ -250,7 +253,16 @@ public class RecoveryService {
     private boolean reconcileRunningCountersForGroupAndUser(String groupCode, String userId, String trigger) {
         long dbGroupRunning = taskRepository.countRunningByGroup(groupCode);
         long redisGroupRunning = concurrencyGuard.groupRunning(groupCode);
-        if (redisGroupRunning <= dbGroupRunning) {
+        if (redisGroupRunning < dbGroupRunning) {
+            Map<String, Long> dbUserRunningByUserId = taskRepository.countRunningByUserInGroup(groupCode);
+            concurrencyGuard.syncRunningCounters(groupCode, dbGroupRunning, dbUserRunningByUserId);
+            long redisGroupAfter = concurrencyGuard.groupRunning(groupCode);
+            log.warn("running counters immediately rebuilt by user hint (redis<db), group={}, user={}, trigger={}, "
+                            + "dbGroupRunning={}, redisGroupBefore={}, redisGroupAfter={}, dbUserRunningByUserId={}",
+                    groupCode, userId, trigger, dbGroupRunning, redisGroupRunning, redisGroupAfter, dbUserRunningByUserId);
+            return true;
+        }
+        if (redisGroupRunning == dbGroupRunning) {
             return false;
         }
 

@@ -111,6 +111,7 @@ class DependencyIntegrationTest {
         SchedulerTask downstream = taskRepository.findById(downstreamId).orElseThrow();
         assertEquals(TaskStatus.FAILED, downstream.getStatus());
         assertEquals("DEPENDENCY_NOT_SATISFIED", downstream.getErrorCode());
+        assertEquals("dependency task status not satisfied: taskId=" + upstreamId, downstream.getErrorMsg());
 
         Integer impossibleCount = jdbcTemplate.queryForObject(
                 """

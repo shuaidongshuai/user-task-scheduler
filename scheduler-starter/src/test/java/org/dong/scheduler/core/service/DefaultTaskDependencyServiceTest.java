@@ -7,6 +7,7 @@ import org.dong.scheduler.core.repo.TaskDependencyRepository;
 import org.dong.scheduler.core.repo.TaskRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
@@ -169,22 +170,29 @@ class DefaultTaskDependencyServiceTest {
         when(taskDependencyRepository.findDependentTaskIds(11L)).thenReturn(List.of(201L));
         when(taskRepository.findById(201L)).thenReturn(Optional.of(middleTask));
         when(taskDependencyRepository.summarize(201L)).thenReturn(new TaskDependencySummary(1, 0, 1));
+        when(taskDependencyRepository.findFirstImpossibleDependsOnTaskId(201L)).thenReturn(Optional.of(11L));
         when(taskRepository.markFailedPendingByDependency(eq(201L), eq("DEPENDENCY_NOT_SATISFIED"), any(), eq(now)))
                 .thenReturn(true);
 
         when(taskDependencyRepository.findDependentTaskIds(201L)).thenReturn(List.of(202L));
         when(taskRepository.findById(202L)).thenReturn(Optional.of(leafTask));
         when(taskDependencyRepository.summarize(202L)).thenReturn(new TaskDependencySummary(1, 0, 1));
+        when(taskDependencyRepository.findFirstImpossibleDependsOnTaskId(202L)).thenReturn(Optional.of(201L));
         when(taskRepository.markFailedPendingByDependency(eq(202L), eq("DEPENDENCY_NOT_SATISFIED"), any(), eq(now)))
                 .thenReturn(true);
 
         List<SchedulerTask> queueTasks = service.onUpstreamTaskTerminal(11L, TaskStatus.FAILED, now);
 
         assertTrue(queueTasks.isEmpty());
+        ArgumentCaptor<String> errorMsgCaptor = ArgumentCaptor.forClass(String.class);
         verify(taskDependencyRepository).updateByUpstreamTerminal(11L, TaskStatus.FAILED, now);
         verify(taskDependencyRepository).updateByUpstreamTerminal(201L, TaskStatus.FAILED, now);
-        verify(taskRepository).markFailedPendingByDependency(eq(201L), eq("DEPENDENCY_NOT_SATISFIED"), any(), eq(now));
-        verify(taskRepository).markFailedPendingByDependency(eq(202L), eq("DEPENDENCY_NOT_SATISFIED"), any(), eq(now));
+        verify(taskRepository).markFailedPendingByDependency(eq(201L), eq("DEPENDENCY_NOT_SATISFIED"), errorMsgCaptor.capture(), eq(now));
+        verify(taskRepository).markFailedPendingByDependency(eq(202L), eq("DEPENDENCY_NOT_SATISFIED"), errorMsgCaptor.capture(), eq(now));
+        assertEquals(List.of(
+                "dependency task status not satisfied: taskId=11",
+                "dependency task status not satisfied: taskId=201"
+        ), errorMsgCaptor.getAllValues());
     }
 
     @Test

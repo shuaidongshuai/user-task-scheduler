@@ -102,8 +102,8 @@ public class SchedulerAutoConfiguration {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
         executor.setThreadNamePrefix("sched-worker-");
         executor.setCorePoolSize(properties.getWorkerThreads());
-        executor.setMaxPoolSize(properties.getWorkerThreads());
-        executor.setQueueCapacity(properties.getWorkerThreads() * 10);
+        executor.setMaxPoolSize(Math.max(properties.getWorkerThreads(), properties.getMaxWorkerThreads()));
+        executor.setQueueCapacity(0);
         executor.initialize();
         return executor;
     }

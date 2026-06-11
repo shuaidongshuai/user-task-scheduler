@@ -6,6 +6,7 @@ import org.dong.scheduler.core.model.TaskDependencySummary;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 
 public interface TaskDependencyRepository {
     void batchInsert(Long taskId, List<TaskDependencyRequest> dependencies, LocalDateTime now);
@@ -17,4 +18,6 @@ public interface TaskDependencyRepository {
     void updateByUpstreamTerminal(Long dependsOnTaskId, TaskStatus actualStatus, LocalDateTime now);
 
     TaskDependencySummary summarize(Long taskId);
+
+    Optional<Long> findFirstImpossibleDependsOnTaskId(Long taskId);
 }

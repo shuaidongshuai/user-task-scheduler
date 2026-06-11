@@ -19,17 +19,11 @@ import jakarta.annotation.PreDestroy;
 
 import java.time.LocalDateTime;
 import java.util.UUID;
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledThreadPoolExecutor;
-import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 @Slf4j
 public class WorkerService {
@@ -41,7 +35,7 @@ public class WorkerService {
     private final RecoveryService recoveryService;
     private final ThreadPoolTaskExecutor workerExecutor;
     private final ScheduledExecutorService heartbeatExecutor;
-    private final ExecutorService invokeExecutor;
+    private final ScheduledExecutorService timeoutExecutor;
     private final BusinessTaskStateProviderRegistry businessTaskStateProviderRegistry;
     private final TaskStateService taskStateService;
 
@@ -63,17 +57,12 @@ public class WorkerService {
         this.workerExecutor = workerExecutor;
         this.businessTaskStateProviderRegistry = businessTaskStateProviderRegistry;
         this.taskStateService = taskStateService;
-        this.heartbeatExecutor = new ScheduledThreadPoolExecutor(Math.max(2, properties.getWorkerThreads() / 4));
-        int invokeThreads = Math.max(2, properties.getWorkerThreads());
-        BlockingQueue<Runnable> invokeQueue = new LinkedBlockingQueue<>(invokeThreads * 4);
-        this.invokeExecutor = new ThreadPoolExecutor(
-                invokeThreads,
-                invokeThreads,
-                60L,
-                TimeUnit.SECONDS,
-                invokeQueue,
-                new ThreadPoolExecutor.AbortPolicy()
-        );
+        int heartbeatThreads = properties.getHeartbeatThreads() > 0
+                ? properties.getHeartbeatThreads()
+                : Math.max(2, properties.getWorkerThreads() / 4);
+        int timeoutMonitorThreads = Math.max(1, properties.getTimeoutMonitorThreads());
+        this.heartbeatExecutor = new ScheduledThreadPoolExecutor(heartbeatThreads);
+        this.timeoutExecutor = new ScheduledThreadPoolExecutor(timeoutMonitorThreads);
     }
 
     public void submit(SchedulerTask task, GroupConfig groupConfig, String executeNo) {
@@ -232,54 +221,56 @@ public class WorkerService {
         }
     }
 
+    public String newExecuteNo() {
+        return UUID.randomUUID().toString().replace("-", "");
+    }
+
     private TaskExecuteResult executeWithTimeout(SchedulerTask task, TaskHandler handler) throws Exception {
         Integer timeout = task.getExecuteTimeoutSec();
         int timeoutSec = timeout == null ? properties.getDefaultExecuteTimeoutSec() : timeout;
-        int graceSec = Math.max(1, properties.getTimeoutInterruptGraceSec());
-
-        AtomicReference<Thread> runningThread = new AtomicReference<>();
-        CountDownLatch done = new CountDownLatch(1);
-        Future<TaskExecuteResult> future = invokeExecutor.submit(ThreadContextUtil.addContext(() -> {
-            runningThread.set(Thread.currentThread());
-            try {
-                return handler.execute(task);
-            } finally {
-                done.countDown();
-            }
-        }));
-        try {
-            TaskExecuteResult result = future.get(timeoutSec, TimeUnit.SECONDS);
+        if (timeoutSec <= 0) {
+            TaskExecuteResult result = handler.execute(task);
             if (result == null) {
                 log.warn("task handler returned null result, taskId={}, taskNo={}", task.getId(), task.getTaskNo());
                 return TaskExecuteResult.failed("TASK_HANDLER_NULL_RESULT", "task handler returned null result", false);
             }
             return result;
-        } catch (java.util.concurrent.TimeoutException e) {
-            future.cancel(true);
-            Thread t = runningThread.get();
-            if (t != null) {
-                t.interrupt();
-            }
-            boolean stopped = done.await(graceSec, TimeUnit.SECONDS);
-            log.warn("task execute timeout, taskId={}, taskNo={}, timeoutSec={}", task.getId(), task.getTaskNo(), timeoutSec);
-            if (!stopped) {
-                log.error("task execute timeout and thread still alive after grace, taskId={}, taskNo={}, timeoutSec={}, graceSec={}",
-                        task.getId(), task.getTaskNo(), timeoutSec, graceSec);
-                return TaskExecuteResult.failed("TASK_TIMEOUT_UNINTERRUPTIBLE",
-                        "task execution timeout and thread not stopped after interrupt", false);
-            }
-            return TaskExecuteResult.failed("TASK_TIMEOUT", "task execution timeout", true);
-        } catch (RejectedExecutionException e) {
-            log.warn("task execute rejected by bounded invoke pool, taskId={}, taskNo={}", task.getId(), task.getTaskNo());
-            return TaskExecuteResult.failed("TASK_EXECUTOR_REJECTED", "invoke executor queue is full", true);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            return TaskExecuteResult.failed("TASK_EXECUTOR_INTERRUPTED", "worker interrupted while waiting task result", true);
         }
-    }
 
-    public String newExecuteNo() {
-        return UUID.randomUUID().toString().replace("-", "");
+        Thread workerThread = Thread.currentThread();
+        AtomicBoolean timedOut = new AtomicBoolean(false);
+        Future<?> timeoutFuture = timeoutExecutor.schedule(
+                ThreadContextUtil.addContext(() -> {
+                    timedOut.set(true);
+                    workerThread.interrupt();
+                    log.warn("task execute timeout, interrupt worker thread, taskId={}, taskNo={}, timeoutSec={}",
+                            task.getId(), task.getTaskNo(), timeoutSec);
+                }),
+                timeoutSec,
+                TimeUnit.SECONDS
+        );
+        try {
+            TaskExecuteResult result = handler.execute(task);
+            if (timedOut.get()) {
+                return TaskExecuteResult.failed("TASK_TIMEOUT", "task execution timeout", true);
+            }
+            if (result == null) {
+                log.warn("task handler returned null result, taskId={}, taskNo={}", task.getId(), task.getTaskNo());
+                return TaskExecuteResult.failed("TASK_HANDLER_NULL_RESULT", "task handler returned null result", false);
+            }
+            return result;
+        } catch (InterruptedException e) {
+            if (timedOut.get()) {
+                return TaskExecuteResult.failed("TASK_TIMEOUT", "task execution timeout", true);
+            }
+            Thread.currentThread().interrupt();
+            throw e;
+        } finally {
+            timeoutFuture.cancel(false);
+            if (timedOut.get()) {
+                Thread.interrupted();
+            }
+        }
     }
 
     private LocalDateTime nextRetryTime(SchedulerTask task) {
@@ -298,9 +289,9 @@ public class WorkerService {
             log.warn("shutdown heartbeatExecutor failed", e);
         }
         try {
-            invokeExecutor.shutdownNow();
+            timeoutExecutor.shutdownNow();
         } catch (Exception e) {
-            log.warn("shutdown invokeExecutor failed", e);
+            log.warn("shutdown timeoutExecutor failed", e);
         }
     }
 }

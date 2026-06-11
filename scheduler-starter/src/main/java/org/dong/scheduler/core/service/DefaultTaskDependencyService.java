@@ -82,6 +82,8 @@ public class DefaultTaskDependencyService implements TaskDependencyService {
     }
 
     private String buildDependencyErrorMessage(Long taskId) {
-        return "dependency task status not satisfied: taskId=" + taskId;
+        Long dependencyTaskId = taskDependencyRepository.findFirstImpossibleDependsOnTaskId(taskId)
+                .orElse(taskId);
+        return "dependency task status not satisfied: taskId=" + dependencyTaskId;
     }
 }

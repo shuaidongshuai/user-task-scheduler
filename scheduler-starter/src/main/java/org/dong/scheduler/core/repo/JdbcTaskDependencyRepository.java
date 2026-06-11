@@ -8,6 +8,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 
 public class JdbcTaskDependencyRepository implements TaskDependencyRepository {
     private final JdbcTemplate jdbcTemplate;
@@ -155,6 +156,19 @@ public class JdbcTaskDependencyRepository implements TaskDependencyRepository {
                 // non-terminal statuses never propagate dependency resolution
             }
         }
+    }
+
+    @Override
+    public Optional<Long> findFirstImpossibleDependsOnTaskId(Long taskId) {
+        List<Long> list = jdbcTemplate.query("""
+                select depends_on_task_id
+                  from scheduler_task_dependency
+                 where task_id = ?
+                   and status = 'IMPOSSIBLE'
+                 order by id
+                 limit 1
+                """, (rs, rowNum) -> rs.getLong(1), taskId);
+        return list.stream().findFirst();
     }
 
     @Override
