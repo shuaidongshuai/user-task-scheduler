@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.core.task.TaskRejectedException;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -22,6 +23,7 @@ import java.util.Optional;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -258,6 +260,46 @@ class DispatchServiceTest {
         verify(taskStateService).markFailedByWaitDeadline(eq(501L), any(LocalDateTime.class));
         verify(queueRedisService).removeFromReady("g1", 501L);
         verify(workerService, never()).submit(any(), eq(group), any());
+    }
+
+    @Test
+    void shouldStopCurrentDispatchRoundAfterWorkerPoolReject() {
+        GroupConfig group = new GroupConfig();
+        group.setGroupCode("g1");
+        group.setEnabled(true);
+        group.setMaxConcurrency(5);
+        group.setDispatchBatchSize(2);
+        group.setLockExpireSec(60);
+
+        SchedulerTask first = runnableTask(601L, "u1");
+        SchedulerTask second = runnableTask(602L, "u2");
+
+        when(groupConfigRepository.listEnabled()).thenReturn(List.of(group));
+        when(queueRedisService.promoteDueTasks(eq("g1"), anyLong(), eq(2))).thenReturn(List.of());
+        when(concurrencyGuard.groupRunning("g1")).thenReturn(0L, 0L);
+        when(queueRedisService.peekReady("g1", 0, 2)).thenReturn(List.of(601L, 602L));
+        when(taskRepository.findByIds(List.of(601L, 602L))).thenReturn(Map.of(
+                601L, first,
+                602L, second
+        ));
+        when(dynamicUserLimitService.calculate(group, 0L)).thenReturn(4);
+        when(workerService.newExecuteNo()).thenReturn("exec-601");
+        when(concurrencyGuard.tryAcquire("g1", "u1", 601L, 5, 4, 60, "exec-601")).thenReturn(true);
+        when(taskRepository.casToRunning(eq(601L), eq(null), eq(Thread.currentThread().getName()), any(LocalDateTime.class)))
+                .thenReturn(true);
+        doThrow(new TaskRejectedException("worker pool full"))
+                .when(workerService).submit(first, group, "exec-601");
+        when(concurrencyGuard.release("g1", "u1", 601L, "exec-601")).thenReturn(true);
+        when(taskRepository.rescheduleToRunnable(eq(601L), any(LocalDateTime.class),
+                eq("DISPATCH_SUBMIT_REJECTED"), any(), any(LocalDateTime.class))).thenReturn(true);
+
+        dispatchService.dispatchOnce();
+
+        verify(workerService).submit(first, group, "exec-601");
+        verify(workerService, never()).submit(second, group, "exec-602");
+        verify(taskRepository, never()).casToRunning(eq(602L), eq(null), eq(Thread.currentThread().getName()), any(LocalDateTime.class));
+        verify(queueRedisService).removeFromReady("g1", 601L);
+        verify(queueRedisService).enqueue(first);
     }
 
     private SchedulerTask runnableTask(long id, String userId) {

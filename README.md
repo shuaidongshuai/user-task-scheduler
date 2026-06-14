@@ -15,6 +15,7 @@
 - user 级并发控制（支持动态并发策略）
 - 优先级调度（高优先级优先执行）
 - 任务依赖编排（支持 DAG）
+- 任务超时自动取消（支持链式任务超时自动降级）
 - 失败重试与延迟重试
 - 宕机恢复（心跳超时自动回收）
 - 可选业务状态短路（业务已完成/失败不重复执行）
@@ -130,6 +131,46 @@ public void submitDemo() {
 - `SUCCESS`
 - `FAILED`
 - `TERMINAL`
+
+### 超时自动取消与链式降级
+
+提交任务时可设置 `maxWaitSec`，表示任务从 `executeAt` 开始，最多还能等待多久；超过该时间后，如果任务仍处于等待态，会被系统自动标记为失败。
+
+这个能力可以和链式任务一起使用：主任务超时自动失败后，后续依赖 `FAILED` 的降级任务会被自动拉起执行。
+
+典型场景：
+
+- 任务 A：主流程任务，设置 `maxWaitSec`
+- 任务 B：兜底/降级任务，依赖任务 A 的 `FAILED`
+
+这样当任务 A 长时间未执行成功、最终被系统超时取消后，任务 B 会自动接管。
+
+批量链式提交时可直接这样编排：
+
+```java
+BatchSubmitRequest request = new BatchSubmitRequest(List.of(
+        new BatchSubmitTaskRequest()
+                .setClientTaskRef("main")
+                .setGroupCode("image-render")
+                .setUserId("user-1001")
+                .setBizType("image.render")
+                .setBizKey("biz-main")
+                .setExecuteAt(LocalDateTime.now())
+                .setMaxWaitSec(300),
+        new BatchSubmitTaskRequest()
+                .setClientTaskRef("fallback")
+                .setGroupCode("image-render")
+                .setUserId("user-1001")
+                .setBizType("image.render.fallback")
+                .setBizKey("biz-fallback")
+                .setExecuteAt(LocalDateTime.now())
+                .setDependencies(List.of(
+                        new BatchSubmitDependencyRequest(null, "main", DependencyTargetState.FAILED)
+                ))
+));
+
+schedulerClient.submitBatch(request);
+```
 
 ### 业务状态短路（可选）
 

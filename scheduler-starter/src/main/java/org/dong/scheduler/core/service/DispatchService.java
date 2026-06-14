@@ -11,6 +11,7 @@ import org.dong.scheduler.core.redis.QueueRedisService;
 import org.dong.scheduler.core.repo.GroupConfigRepository;
 import org.dong.scheduler.core.repo.TaskRepository;
 import org.dong.scheduler.core.spi.BusinessTaskStateProvider;
+import org.springframework.core.task.TaskRejectedException;
 
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -20,6 +21,7 @@ import java.util.Optional;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
 
 @Slf4j
@@ -127,6 +129,7 @@ public class DispatchService {
         int readyScanned = 0;
         int readyScanPages = 0;
         int readyScanPageLimit = Math.max(1, properties.getReadyScanPageLimit());
+        boolean workerPoolSaturated = false;
         while (groupRunning < cfg.getMaxConcurrency() && readyScanPages < readyScanPageLimit) {
             groupRunning = concurrencyGuard.groupRunning(cfg.getGroupCode());
             if (groupRunning >= cfg.getMaxConcurrency()) {
@@ -300,7 +303,16 @@ public class DispatchService {
                     log.warn("dispatch submit rejected and rolled back by worker pool capacity, taskId={}, taskNo={}, "
                                     + "executeNo={}, rollback={}, nextCheckAt={}",
                             task.getId(), task.getTaskNo(), executeNo, rollback, nextCheckAt, ex);
+                    if (isWorkerPoolRejected(ex)) {
+                        workerPoolSaturated = true;
+                        log.info("dispatch stop current round because worker pool is saturated, group={}, taskId={}, taskNo={}",
+                                cfg.getGroupCode(), task.getId(), task.getTaskNo());
+                        break;
+                    }
                 }
+            }
+            if (workerPoolSaturated) {
+                break;
             }
             if (!progressed) {
                 offset += ready.size();
@@ -331,5 +343,16 @@ public class DispatchService {
 
     private LocalDateTime nextRetryTime(SchedulerTask task) {
         return LocalDateTime.now().plusSeconds(task.retryDelaySec(properties.getDefaultRetryDelaySec()));
+    }
+
+    private boolean isWorkerPoolRejected(Throwable ex) {
+        Throwable current = ex;
+        while (current != null) {
+            if (current instanceof RejectedExecutionException) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 }

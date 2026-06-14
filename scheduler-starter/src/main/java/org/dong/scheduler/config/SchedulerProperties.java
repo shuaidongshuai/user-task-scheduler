@@ -31,7 +31,7 @@ public class SchedulerProperties {
     private int recoveryScanLimit = 200;
     private int queueRefillLimit = 500;
     private int workerThreads = 16;
-    private int maxWorkerThreads = 1000;
+    private int maxWorkerThreads = 200;
     /**
      * Heartbeat scheduler threads. 0 means max(2, workerThreads / 4).
      */
