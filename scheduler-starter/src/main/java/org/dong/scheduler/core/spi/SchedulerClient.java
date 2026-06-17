@@ -21,6 +21,11 @@ public interface SchedulerClient {
     long submit(TaskSubmitRequest request);
 
     /**
+     * 同步提交并在调用线程直接执行任务。
+     */
+    long executeSync(TaskSubmitRequest request);
+
+    /**
      * 批量提交任务。批内任务及依赖在同一事务内落库；任一任务失败将整体回滚。
      */
     List<BatchSubmitResultItem> submitBatch(BatchSubmitRequest request);

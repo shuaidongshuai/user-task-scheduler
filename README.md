@@ -13,6 +13,7 @@
 - 多任务组（group）隔离调度
 - group 最大并发控制
 - user 级并发控制（支持动态并发策略）
+- 同步执行任务提交（调用线程内执行，复用 group/user 并发限制）
 - 优先级调度（高优先级优先执行）
 - 任务依赖编排（支持 DAG）
 - 任务超时自动取消（支持链式任务超时自动降级）
@@ -107,6 +108,22 @@ public void submitDemo() {
 }
 ```
 
+同步执行场景可直接在调用线程内执行任务：
+
+```java
+public void executeSyncDemo() {
+    TaskSubmitRequest req = new TaskSubmitRequest()
+            .setGroupCode("image-render")
+            .setUserId("user-1001")
+            .setBizType("image.render")
+            .setBizKey("biz-key-sync-001")
+            .setPriority(90)
+            .setExecuteAt(LocalDateTime.now())
+            .setExecuteTimeoutSec(60);
+    long taskId = schedulerClient.executeSync(req);
+}
+```
+
 ## 使用说明
 
 ### group 配置
@@ -131,6 +148,22 @@ public void submitDemo() {
 - `SUCCESS`
 - `FAILED`
 - `TERMINAL`
+
+### 同步执行接口
+
+`SchedulerClient#executeSync(TaskSubmitRequest)` 会直接在当前调用线程执行 `TaskHandler`，不会进入异步 ready queue/worker 调度链路，但仍然共享同一个 group/user 并发限制。
+
+适用场景：
+
+- 调用方需要阻塞等待执行完成
+- 希望复用现有 `TaskHandler`、执行记录、超时控制、并发控制
+
+当前限制：
+
+- 仅支持立即执行任务：`executeAt` 需要小于等于当前时间
+- 不支持 `dependencies`
+- 同步路径按单次执行处理，不走异步重试链路
+- 若 group 或 user 并发已满，会直接抛出限流异常
 
 ### 超时自动取消与链式降级
 

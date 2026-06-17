@@ -6,6 +6,8 @@ import org.dong.scheduler.core.model.TaskSubmitRequest;
 import org.dong.scheduler.core.model.TaskDependencyRequest;
 import org.dong.scheduler.core.model.batch.BatchSubmitDependencyRequest;
 import org.dong.scheduler.core.model.batch.BatchSubmitResultItem;
+import org.dong.scheduler.core.model.GroupConfig;
+import org.dong.scheduler.core.redis.ConcurrencyGuard;
 import org.dong.scheduler.core.redis.QueueRedisService;
 import org.dong.scheduler.core.repo.TaskRepository;
 import org.springframework.transaction.support.TransactionTemplate;
@@ -15,6 +17,7 @@ import java.util.LinkedHashMap;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
 public class TaskStateService {
     private static final String WAIT_TIMEOUT_ERROR_CODE = "SCHEDULE_WAIT_TIMEOUT";
@@ -22,15 +25,18 @@ public class TaskStateService {
 
     private final TaskRepository taskRepository;
     private final TaskDependencyService taskDependencyService;
+    private final ConcurrencyGuard concurrencyGuard;
     private final QueueRedisService queueRedisService;
     private final TransactionTemplate transactionTemplate;
 
     public TaskStateService(TaskRepository taskRepository,
                             TaskDependencyService taskDependencyService,
+                            ConcurrencyGuard concurrencyGuard,
                             QueueRedisService queueRedisService,
                             TransactionTemplate transactionTemplate) {
         this.taskRepository = taskRepository;
         this.taskDependencyService = taskDependencyService;
+        this.concurrencyGuard = concurrencyGuard;
         this.queueRedisService = queueRedisService;
         this.transactionTemplate = transactionTemplate;
     }
@@ -58,6 +64,62 @@ public class TaskStateService {
             routeTaskToQueue(result.task);
         }
         return result.taskId;
+    }
+
+    public long submitDirect(String taskNo,
+                             TaskSubmitRequest request,
+                             GroupConfig groupConfig,
+                             int userLimit,
+                             String instanceId,
+                             String threadName,
+                             String executeNo) {
+        AtomicReference<DirectAcquireContext> acquiredRef = new AtomicReference<>();
+        try {
+            Long taskId = transactionTemplate.execute(status -> {
+                LocalDateTime now = LocalDateTime.now();
+                if (request.getDependencies() != null && !request.getDependencies().isEmpty()) {
+                    throw new IllegalArgumentException("sync submit does not support dependencies");
+                }
+                if (request.getExecuteAt().isAfter(now)) {
+                    throw new IllegalArgumentException("sync submit requires executeAt <= now");
+                }
+                long createdTaskId = taskRepository.insert(taskNo, request, request.getExtInfo(), TaskStatus.RUNNABLE);
+                boolean acquired = concurrencyGuard.tryAcquire(
+                        groupConfig.getGroupCode(),
+                        request.getUserId(),
+                        createdTaskId,
+                        groupConfig.getMaxConcurrency(),
+                        userLimit,
+                        groupConfig.getLockExpireSec(),
+                        executeNo
+                );
+                if (!acquired) {
+                    throw new IllegalStateException("sync task is throttled by concurrency limit");
+                }
+                acquiredRef.set(new DirectAcquireContext(groupConfig.getGroupCode(), request.getUserId(), createdTaskId, executeNo));
+                boolean running = taskRepository.casToRunning(createdTaskId, instanceId, threadName, now);
+                if (!running) {
+                    boolean released = concurrencyGuard.release(groupConfig.getGroupCode(), request.getUserId(), createdTaskId, executeNo);
+                    acquiredRef.set(null);
+                    if (!released) {
+                        throw new IllegalStateException("sync submit failed to release concurrency after CAS miss, taskId=" + createdTaskId);
+                    }
+                    throw new IllegalStateException("sync submit failed to enter RUNNING state, taskId=" + createdTaskId);
+                }
+                return createdTaskId;
+            });
+            if (taskId == null) {
+                throw new IllegalStateException("submitDirect transaction returned null");
+            }
+            acquiredRef.set(null);
+            return taskId;
+        } catch (RuntimeException ex) {
+            DirectAcquireContext acquired = acquiredRef.getAndSet(null);
+            if (acquired != null) {
+                concurrencyGuard.release(acquired.groupCode(), acquired.userId(), acquired.taskId(), acquired.executeNo());
+            }
+            throw ex;
+        }
     }
 
     public List<BatchSubmitResultItem> submitBatch(List<BatchSubmitCommand> commands) {
@@ -261,6 +323,14 @@ public class TaskStateService {
     private record BatchSubmissionResult(
             List<BatchSubmitResultItem> items,
             List<SchedulerTask> queueTasks
+    ) {
+    }
+
+    private record DirectAcquireContext(
+            String groupCode,
+            String userId,
+            long taskId,
+            String executeNo
     ) {
     }
 }

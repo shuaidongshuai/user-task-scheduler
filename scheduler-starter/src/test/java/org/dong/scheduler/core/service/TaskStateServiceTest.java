@@ -7,6 +7,7 @@ import org.dong.scheduler.core.model.TaskDependencyRequest;
 import org.dong.scheduler.core.model.TaskSubmitRequest;
 import org.dong.scheduler.core.model.batch.BatchSubmitDependencyRequest;
 import org.dong.scheduler.core.model.batch.BatchSubmitResultItem;
+import org.dong.scheduler.core.redis.ConcurrencyGuard;
 import org.dong.scheduler.core.redis.QueueRedisService;
 import org.dong.scheduler.core.repo.TaskRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -38,6 +39,8 @@ class TaskStateServiceTest {
     @Mock
     private TaskDependencyService taskDependencyService;
     @Mock
+    private ConcurrencyGuard concurrencyGuard;
+    @Mock
     private QueueRedisService queueRedisService;
     @Mock
     private TransactionTemplate transactionTemplate;
@@ -46,7 +49,7 @@ class TaskStateServiceTest {
 
     @BeforeEach
     void setUp() {
-        taskStateService = new TaskStateService(taskRepository, taskDependencyService, queueRedisService, transactionTemplate);
+        taskStateService = new TaskStateService(taskRepository, taskDependencyService, concurrencyGuard, queueRedisService, transactionTemplate);
         when(transactionTemplate.execute(any(TransactionCallback.class)))
                 .thenAnswer(invocation -> {
                     TransactionCallback<?> callback = invocation.getArgument(0);

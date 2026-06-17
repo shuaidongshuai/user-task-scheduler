@@ -21,6 +21,7 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -268,17 +269,27 @@ class CodexFairSchedulingRealEnvTest {
         @Bean
         @Primary
         GroupConfigRepository fairOnlyGroupConfigRepository() {
-            return () -> {
-                GroupConfig group = new GroupConfig();
-                group.setGroupCode(TEST_GROUP);
-                group.setEnabled(true);
-                group.setMaxConcurrency(4);
-                group.setUserBaseConcurrency(2);
-                group.setDynamicUserLimitEnabled(false);
-                group.setDispatchBatchSize(100);
-                group.setHeartbeatTimeoutSec(30);
-                group.setLockExpireSec(60);
-                return List.of(group);
+            return new GroupConfigRepository() {
+                @Override
+                public List<GroupConfig> listEnabled() {
+                    GroupConfig group = new GroupConfig();
+                    group.setGroupCode(TEST_GROUP);
+                    group.setEnabled(true);
+                    group.setMaxConcurrency(4);
+                    group.setUserBaseConcurrency(2);
+                    group.setDynamicUserLimitEnabled(false);
+                    group.setDispatchBatchSize(100);
+                    group.setHeartbeatTimeoutSec(30);
+                    group.setLockExpireSec(60);
+                    return List.of(group);
+                }
+
+                @Override
+                public Optional<GroupConfig> findEnabledByGroupCode(String groupCode) {
+                    return listEnabled().stream()
+                            .filter(group -> group.getGroupCode().equals(groupCode))
+                            .findFirst();
+                }
             };
         }
 

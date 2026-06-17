@@ -2,6 +2,8 @@ package org.dong.scheduler.core.service;
 
 import lombok.extern.slf4j.Slf4j;
 import org.dong.scheduler.config.SchedulerProperties;
+import org.dong.scheduler.core.enums.TaskStatus;
+import org.dong.scheduler.core.model.GroupConfig;
 import org.dong.scheduler.core.model.SchedulerTask;
 import org.dong.scheduler.core.model.TaskDependencyRequest;
 import org.dong.scheduler.core.model.TaskSubmitRequest;
@@ -9,7 +11,9 @@ import org.dong.scheduler.core.model.batch.BatchSubmitDependencyRequest;
 import org.dong.scheduler.core.model.batch.BatchSubmitRequest;
 import org.dong.scheduler.core.model.batch.BatchSubmitResultItem;
 import org.dong.scheduler.core.model.batch.BatchSubmitTaskRequest;
+import org.dong.scheduler.core.redis.ConcurrencyGuard;
 import org.dong.scheduler.core.redis.QueueRedisService;
+import org.dong.scheduler.core.repo.GroupConfigRepository;
 import org.dong.scheduler.core.repo.TaskRepository;
 import org.dong.scheduler.core.spi.SchedulerClient;
 
@@ -35,15 +39,27 @@ public class DefaultSchedulerClient implements SchedulerClient {
     private final QueueRedisService queueRedisService;
     private final SchedulerProperties properties;
     private final TaskStateService taskStateService;
+    private final GroupConfigRepository groupConfigRepository;
+    private final DynamicUserLimitService dynamicUserLimitService;
+    private final ConcurrencyGuard concurrencyGuard;
+    private final WorkerService workerService;
 
     public DefaultSchedulerClient(TaskRepository taskRepository,
                                   QueueRedisService queueRedisService,
                                   SchedulerProperties properties,
-                                  TaskStateService taskStateService) {
+                                  TaskStateService taskStateService,
+                                  GroupConfigRepository groupConfigRepository,
+                                  DynamicUserLimitService dynamicUserLimitService,
+                                  ConcurrencyGuard concurrencyGuard,
+                                  WorkerService workerService) {
         this.taskRepository = taskRepository;
         this.queueRedisService = queueRedisService;
         this.properties = properties;
         this.taskStateService = taskStateService;
+        this.groupConfigRepository = groupConfigRepository;
+        this.dynamicUserLimitService = dynamicUserLimitService;
+        this.concurrencyGuard = concurrencyGuard;
+        this.workerService = workerService;
     }
 
     @Override
@@ -60,6 +76,43 @@ public class DefaultSchedulerClient implements SchedulerClient {
                 .orElseThrow(() -> new IllegalStateException("task not found after submit: " + id));
         log.info("task submitted, taskId={}, taskNo={}, status={}, executeAt={}",
                 id, task.getTaskNo(), task.getStatus(), task.getExecuteAt());
+        return id;
+    }
+
+    @Override
+    public long executeSync(TaskSubmitRequest request) {
+        TaskSubmitRequest normalized = normalizeSync(request);
+        GroupConfig groupConfig = groupConfigRepository.findEnabledByGroupCode(normalized.getGroupCode())
+                .orElseThrow(() -> new IllegalArgumentException("enabled group config not found: " + normalized.getGroupCode()));
+        long groupRunning = concurrencyGuard.groupRunning(groupConfig.getGroupCode());
+        int userLimit = dynamicUserLimitService.calculate(groupConfig, groupRunning);
+        String taskNo = "t-" + UUID.randomUUID().toString().replace("-", "");
+        String executeNo = UUID.randomUUID().toString().replace("-", "");
+        log.info("submit sync task request accepted, taskNo={}, group={}, user={}, bizType={}, priority={}, executeAt={}, "
+                        + "userLimit={}, groupRunning={}",
+                taskNo, normalized.getGroupCode(), normalized.getUserId(), normalized.getBizType(),
+                normalized.getPriority(), normalized.getExecuteAt(), userLimit, groupRunning);
+        long id = taskStateService.submitDirect(
+                taskNo,
+                normalized,
+                groupConfig,
+                userLimit,
+                properties.getInstanceId(),
+                Thread.currentThread().getName(),
+                executeNo
+        );
+        SchedulerTask task = taskRepository.findById(id)
+                .orElseThrow(() -> new IllegalStateException("task not found after sync submit: " + id));
+        workerService.executeDirect(task, groupConfig, executeNo);
+        SchedulerTask finishedTask = taskRepository.findById(id)
+                .orElseThrow(() -> new IllegalStateException("task not found after sync execute: " + id));
+        if (finishedTask.getStatus() != TaskStatus.SUCCESS) {
+            throw new IllegalStateException("sync task finished with status=" + finishedTask.getStatus()
+                    + ", taskId=" + id
+                    + ", errorCode=" + finishedTask.getErrorCode()
+                    + ", errorMsg=" + finishedTask.getErrorMsg());
+        }
+        log.info("sync task finished successfully, taskId={}, taskNo={}", id, finishedTask.getTaskNo());
         return id;
     }
 
@@ -89,6 +142,20 @@ public class DefaultSchedulerClient implements SchedulerClient {
     private TaskSubmitRequest normalizeSingle(TaskSubmitRequest request) {
         TaskSubmitRequest normalized = normalizeBase(request);
         normalizeTaskIdDependencies(normalized);
+        return normalized;
+    }
+
+    private TaskSubmitRequest normalizeSync(TaskSubmitRequest request) {
+        TaskSubmitRequest normalized = normalizeBase(request);
+        if (normalized.getDependencies() != null && !normalized.getDependencies().isEmpty()) {
+            throw new IllegalArgumentException("sync submit does not support dependencies");
+        }
+        if (normalized.getExecuteAt().isAfter(LocalDateTime.now())) {
+            throw new IllegalArgumentException("sync submit requires executeAt <= now");
+        }
+        normalized.setMaxRetryCount(0);
+        normalized.setRetryDelaySec(0);
+        normalized.setDependencies(List.of());
         return normalized;
     }
 

@@ -126,9 +126,10 @@ public class SchedulerAutoConfiguration {
     @ConditionalOnMissingBean
     public TaskStateService taskStateService(TaskRepository taskRepository,
                                              TaskDependencyService taskDependencyService,
+                                             ConcurrencyGuard concurrencyGuard,
                                              QueueRedisService queueRedisService,
                                              TransactionTemplate transactionTemplate) {
-        return new TaskStateService(taskRepository, taskDependencyService, queueRedisService, transactionTemplate);
+        return new TaskStateService(taskRepository, taskDependencyService, concurrencyGuard, queueRedisService, transactionTemplate);
     }
 
     @Bean
@@ -194,8 +195,22 @@ public class SchedulerAutoConfiguration {
     public SchedulerClient schedulerClient(TaskRepository taskRepository,
                                            QueueRedisService queueRedisService,
                                            SchedulerProperties properties,
-                                           TaskStateService taskStateService) {
-        return new DefaultSchedulerClient(taskRepository, queueRedisService, properties, taskStateService);
+                                           TaskStateService taskStateService,
+                                           GroupConfigRepository groupConfigRepository,
+                                           DynamicUserLimitService dynamicUserLimitService,
+                                           ConcurrencyGuard concurrencyGuard,
+                                           WorkerService workerService) {
+        ensureInstanceId(properties);
+        return new DefaultSchedulerClient(
+                taskRepository,
+                queueRedisService,
+                properties,
+                taskStateService,
+                groupConfigRepository,
+                dynamicUserLimitService,
+                concurrencyGuard,
+                workerService
+        );
     }
 
     @Bean

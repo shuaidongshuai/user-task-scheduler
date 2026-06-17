@@ -68,10 +68,14 @@ public class WorkerService {
     public void submit(SchedulerTask task, GroupConfig groupConfig, String executeNo) {
         log.info("task submitted to worker pool, taskId={}, taskNo={}, executeNo={}, group={}, user={}",
                 task.getId(), task.getTaskNo(), executeNo, task.getGroupCode(), task.getUserId());
-        workerExecutor.execute(ThreadContextUtil.addNewContext(() -> run(task, groupConfig, executeNo)));
+        workerExecutor.execute(ThreadContextUtil.addNewContext(() -> executeInternal(task, groupConfig, executeNo)));
     }
 
-    private void run(SchedulerTask task, GroupConfig groupConfig, String executeNo) {
+    public void executeDirect(SchedulerTask task, GroupConfig groupConfig, String executeNo) {
+        executeInternal(task, groupConfig, executeNo);
+    }
+
+    private void executeInternal(SchedulerTask task, GroupConfig groupConfig, String executeNo) {
         long begin = System.currentTimeMillis();
         String instanceId = properties.getInstanceId();
         LocalDateTime now = LocalDateTime.now();

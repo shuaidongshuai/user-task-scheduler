@@ -14,7 +14,6 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
-import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -101,7 +100,7 @@ class WorkerServiceReleaseMismatchTest {
         GroupConfig cfg = new GroupConfig();
         cfg.setLockExpireSec(30);
 
-        ReflectionTestUtils.invokeMethod(workerService, "run", task, cfg, "exec-old");
+        workerService.executeDirect(task, cfg, "exec-old");
 
         verify(concurrencyGuard).release("g1", "u1", 1L, "exec-old");
         verify(recoveryService).reconcileRunningCountersImmediately("g1", "u1", "worker-release-mismatch");
@@ -155,7 +154,7 @@ class WorkerServiceReleaseMismatchTest {
         GroupConfig cfg = new GroupConfig();
         cfg.setLockExpireSec(30);
 
-        ReflectionTestUtils.invokeMethod(workerService, "run", task, cfg, "exec-null");
+        workerService.executeDirect(task, cfg, "exec-null");
 
         verify(taskStateService).markFailed(eq(1L), eq("TASK_HANDLER_NULL_RESULT"),
                 eq("task handler returned null result"), any(LocalDateTime.class));
