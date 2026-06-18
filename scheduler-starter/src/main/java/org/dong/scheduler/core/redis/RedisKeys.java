@@ -8,8 +8,22 @@ public final class RedisKeys {
         return "sched:queue:time:" + group;
     }
 
+    public static String timeQueue(String group, String route) {
+        if (route == null || route.isBlank()) {
+            return timeQueue(group);
+        }
+        return "sched:queue:time:" + group + ":" + route;
+    }
+
     public static String readyQueue(String group) {
         return "sched:queue:ready:" + group;
+    }
+
+    public static String readyQueue(String group, String route) {
+        if (route == null || route.isBlank()) {
+            return readyQueue(group);
+        }
+        return "sched:queue:ready:" + group + ":" + route;
     }
 
     public static String groupRunning(String group) {

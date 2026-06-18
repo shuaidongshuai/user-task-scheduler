@@ -14,6 +14,10 @@ public class SchedulerProperties {
     private boolean dispatchEnabled = true;
     private boolean autoInitDefaultGroup = true;
     private String defaultGroupCode = "public-group";
+    /**
+     * Local dispatch route of current service. Blank means legacy mode without route isolation.
+     */
+    private String dispatchRoute;
     private int defaultGroupMaxConcurrency = 100;
     private int defaultGroupUserBaseConcurrency = 4;
     private int defaultGroupDispatchBatchSize = 100;

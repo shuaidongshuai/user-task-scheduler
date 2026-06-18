@@ -23,12 +23,12 @@ public class QueueRedisService {
 
     public void enqueue(SchedulerTask task) {
         long executeAt = toEpochMillis(task.getExecuteAt());
-        redisTemplate.opsForZSet().add(RedisKeys.timeQueue(task.getGroupCode()), task.getId().toString(), executeAt);
+        redisTemplate.opsForZSet().add(RedisKeys.timeQueue(task.getGroupCode(), task.getDispatchRoute()), task.getId().toString(), executeAt);
     }
 
-    public List<Long> promoteDueTasks(String groupCode, long nowEpochMillis, int limit) {
+    public List<Long> promoteDueTasks(String groupCode, String dispatchRoute, long nowEpochMillis, int limit) {
         Set<String> due = redisTemplate.opsForZSet()
-                .rangeByScore(RedisKeys.timeQueue(groupCode), Double.NEGATIVE_INFINITY, nowEpochMillis, 0, limit);
+                .rangeByScore(RedisKeys.timeQueue(groupCode, dispatchRoute), Double.NEGATIVE_INFINITY, nowEpochMillis, 0, limit);
         if (due == null || due.isEmpty()) {
             return List.of();
         }
@@ -37,7 +37,7 @@ public class QueueRedisService {
         for (String taskIdStr : due) {
             Long taskId = Long.valueOf(taskIdStr);
             moved.add(taskId);
-            redisTemplate.opsForZSet().remove(RedisKeys.timeQueue(groupCode), taskIdStr);
+            redisTemplate.opsForZSet().remove(RedisKeys.timeQueue(groupCode, dispatchRoute), taskIdStr);
         }
         return moved;
     }
@@ -45,44 +45,44 @@ public class QueueRedisService {
     public void addToReady(SchedulerTask task) {
         long createTs = toEpochMillis(task.getCreateTime());
         long score = ((long) (MAX_PRIORITY - task.getPriority())) * SCORE_MULTIPLIER + createTs;
-        redisTemplate.opsForZSet().add(RedisKeys.readyQueue(task.getGroupCode()), task.getId().toString(), score);
+        redisTemplate.opsForZSet().add(RedisKeys.readyQueue(task.getGroupCode(), task.getDispatchRoute()), task.getId().toString(), score);
     }
 
     private long toEpochMillis(LocalDateTime time) {
         return time.atZone(SYSTEM_ZONE).toInstant().toEpochMilli();
     }
 
-    public List<Long> peekReady(String groupCode, int limit) {
-        Set<String> values = redisTemplate.opsForZSet().range(RedisKeys.readyQueue(groupCode), 0, limit - 1);
+    public List<Long> peekReady(String groupCode, String dispatchRoute, int limit) {
+        Set<String> values = redisTemplate.opsForZSet().range(RedisKeys.readyQueue(groupCode, dispatchRoute), 0, limit - 1);
         if (values == null || values.isEmpty()) {
             return List.of();
         }
         return values.stream().map(Long::valueOf).toList();
     }
 
-    public List<Long> peekReady(String groupCode, int offset, int limit) {
-        Set<String> values = redisTemplate.opsForZSet().range(RedisKeys.readyQueue(groupCode), offset, offset + limit - 1);
+    public List<Long> peekReady(String groupCode, String dispatchRoute, int offset, int limit) {
+        Set<String> values = redisTemplate.opsForZSet().range(RedisKeys.readyQueue(groupCode, dispatchRoute), offset, offset + limit - 1);
         if (values == null || values.isEmpty()) {
             return List.of();
         }
         return values.stream().map(Long::valueOf).toList();
     }
 
-    public void removeFromReady(String groupCode, long taskId) {
-        redisTemplate.opsForZSet().remove(RedisKeys.readyQueue(groupCode), String.valueOf(taskId));
+    public void removeFromReady(String groupCode, String dispatchRoute, long taskId) {
+        redisTemplate.opsForZSet().remove(RedisKeys.readyQueue(groupCode, dispatchRoute), String.valueOf(taskId));
     }
 
-    public boolean existsInReady(String groupCode, long taskId) {
-        Double score = redisTemplate.opsForZSet().score(RedisKeys.readyQueue(groupCode), String.valueOf(taskId));
+    public boolean existsInReady(String groupCode, String dispatchRoute, long taskId) {
+        Double score = redisTemplate.opsForZSet().score(RedisKeys.readyQueue(groupCode, dispatchRoute), String.valueOf(taskId));
         return score != null;
     }
 
-    public boolean existsInTime(String groupCode, long taskId) {
-        Double score = redisTemplate.opsForZSet().score(RedisKeys.timeQueue(groupCode), String.valueOf(taskId));
+    public boolean existsInTime(String groupCode, String dispatchRoute, long taskId) {
+        Double score = redisTemplate.opsForZSet().score(RedisKeys.timeQueue(groupCode, dispatchRoute), String.valueOf(taskId));
         return score != null;
     }
 
-    public void removeFromTime(String groupCode, long taskId) {
-        redisTemplate.opsForZSet().remove(RedisKeys.timeQueue(groupCode), String.valueOf(taskId));
+    public void removeFromTime(String groupCode, String dispatchRoute, long taskId) {
+        redisTemplate.opsForZSet().remove(RedisKeys.timeQueue(groupCode, dispatchRoute), String.valueOf(taskId));
     }
 }

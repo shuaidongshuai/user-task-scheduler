@@ -93,7 +93,7 @@ public class SchedulerAutoConfiguration {
     @Bean
     @ConditionalOnMissingBean
     public TaskHandlerRegistry taskHandlerRegistry(ObjectProvider<TaskHandler> handlers) {
-        return new TaskHandlerRegistry(handlers.orderedStream().toList());
+        return new TaskHandlerRegistry(handlers);
     }
 
     @Bean
@@ -112,7 +112,7 @@ public class SchedulerAutoConfiguration {
     @ConditionalOnMissingBean
     public BusinessTaskStateProviderRegistry businessTaskStateProviderRegistry(
             ObjectProvider<BusinessTaskStateProvider> providers) {
-        return new BusinessTaskStateProviderRegistry(providers.orderedStream().toList());
+        return new BusinessTaskStateProviderRegistry(providers);
     }
 
     @Bean
@@ -158,11 +158,12 @@ public class SchedulerAutoConfiguration {
                                            DynamicUserLimitService dynamicUserLimitService,
                                            WorkerService workerService,
                                            RecoveryService recoveryService,
+                                           TaskHandlerRegistry taskHandlerRegistry,
                                            BusinessTaskStateProviderRegistry businessTaskStateProviderRegistry,
                                            TaskStateService taskStateService) {
         ensureInstanceId(properties);
         return new DispatchService(properties, groupConfigRepository, taskRepository, queueRedisService,
-                concurrencyGuard, dynamicUserLimitService, workerService, recoveryService,
+                concurrencyGuard, dynamicUserLimitService, workerService, recoveryService, taskHandlerRegistry,
                 businessTaskStateProviderRegistry, taskStateService);
     }
 

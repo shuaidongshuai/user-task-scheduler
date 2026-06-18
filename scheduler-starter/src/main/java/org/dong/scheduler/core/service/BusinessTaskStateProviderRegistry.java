@@ -1,15 +1,50 @@
 package org.dong.scheduler.core.service;
 
 import org.dong.scheduler.core.spi.BusinessTaskStateProvider;
+import org.springframework.beans.factory.ObjectProvider;
 
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 public class BusinessTaskStateProviderRegistry {
-    private final Map<String, BusinessTaskStateProvider> providers;
+    private final ObjectProvider<BusinessTaskStateProvider> providerSource;
+    private volatile Map<String, BusinessTaskStateProvider> providers;
 
     public BusinessTaskStateProviderRegistry(List<BusinessTaskStateProvider> providers) {
+        this.providerSource = null;
+        this.providers = buildIndex(providers);
+    }
+
+    public BusinessTaskStateProviderRegistry(ObjectProvider<BusinessTaskStateProvider> providerSource) {
+        this.providerSource = providerSource;
+        this.providers = null;
+    }
+
+    public BusinessTaskStateProvider find(String bizType) {
+        return providers().get(bizType);
+    }
+
+    private Map<String, BusinessTaskStateProvider> providers() {
+        Map<String, BusinessTaskStateProvider> current = providers;
+        if (current != null) {
+            return current;
+        }
+        synchronized (this) {
+            current = providers;
+            if (current == null) {
+                if (providerSource == null) {
+                    current = Map.of();
+                } else {
+                    current = buildIndex(providerSource.orderedStream().toList());
+                }
+                providers = current;
+            }
+        }
+        return current;
+    }
+
+    private Map<String, BusinessTaskStateProvider> buildIndex(List<BusinessTaskStateProvider> providers) {
         Map<String, BusinessTaskStateProvider> index = new HashMap<>();
         for (BusinessTaskStateProvider provider : providers) {
             String bizType = provider.bizType();
@@ -20,10 +55,6 @@ public class BusinessTaskStateProviderRegistry {
                         + ", incoming=" + provider.getClass().getName());
             }
         }
-        this.providers = Map.copyOf(index);
-    }
-
-    public BusinessTaskStateProvider find(String bizType) {
-        return providers.get(bizType);
+        return Map.copyOf(index);
     }
 }

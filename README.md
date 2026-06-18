@@ -13,6 +13,7 @@
 - 多任务组（group）隔离调度
 - group 最大并发控制
 - user 级并发控制（支持动态并发策略）
+- 多服务路由隔离消费（共享并发，分开 `time/ready` 队列）
 - 同步执行任务提交（调用线程内执行，复用 group/user 并发限制）
 - 优先级调度（高优先级优先执行）
 - 任务依赖编排（支持 DAG）
@@ -55,6 +56,8 @@ utask:
   scheduler:
     enabled: true
     dispatch-enabled: true
+    # 不配置时保持历史行为；只有显式配置后才启用路由隔离
+    dispatch-route: render-service
     auto-init-default-group: true
     default-group-code: public-group
     default-group-max-concurrency: 100
@@ -138,6 +141,46 @@ public void executeSyncDemo() {
 - `user_base_concurrency`：单用户基础并发
 - `dynamic_user_limit_enabled`：是否开启动态 user 并发
 - `load_strategy_json`：动态并发策略
+
+### dispatchRoute 路由隔离
+
+适用场景：
+
+- 多个业务服务共享同一个 `scheduler_task` 表
+- 需要共享同一个 `groupCode` 的全局并发、用户并发
+- 但 A/B 服务只希望消费各自归属的任务
+
+实现方式：
+
+- `scheduler_task` 新增可空字段 `dispatch_route`
+- 配置了 `dispatchRoute` 的服务，Redis `time/ready` 队列按 `groupCode + dispatchRoute` 分开
+- 未配置 `dispatchRoute` 的服务，继续沿用旧版 `groupCode` 队列键
+- `RUNNING` 并发计数、任务 lease 仍然按原来的 `groupCode` / `groupCode + userId` 共享
+
+配置方式：
+
+```yaml
+utask:
+  scheduler:
+    dispatch-route: a-service
+```
+
+说明：
+
+- 老服务不配 `dispatch-route` 时保持原行为，不会写入 `dispatch_route`，也不会切到新队列
+- 新服务可配置自己的 route，例如 `a-service`、`b-service`
+- 任务提交时未显式设置 `dispatchRoute`，只有当前服务配置了 `utask.scheduler.dispatch-route` 才会自动回退到该值
+- 补偿回填任务时，仅扫描并回填当前 route 的任务，不会把别的 route 任务补进本机队列
+
+数据库变更：
+
+```sql
+alter table scheduler_task
+    add column dispatch_route varchar(64) null comment '调度路由（决定由哪类服务消费，为空表示兼容旧队列）' after group_code;
+
+create index idx_group_route_status_time on scheduler_task(group_code, dispatch_route, status, execute_at);
+create index idx_route_status_time on scheduler_task(dispatch_route, status, execute_at);
+```
 
 ### 任务依赖
 

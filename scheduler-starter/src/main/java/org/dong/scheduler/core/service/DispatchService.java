@@ -11,13 +11,13 @@ import org.dong.scheduler.core.redis.QueueRedisService;
 import org.dong.scheduler.core.repo.GroupConfigRepository;
 import org.dong.scheduler.core.repo.TaskRepository;
 import org.dong.scheduler.core.spi.BusinessTaskStateProvider;
+import org.dong.scheduler.core.spi.TaskHandler;
 import org.springframework.core.task.TaskRejectedException;
 
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -37,6 +37,7 @@ public class DispatchService {
     private final DynamicUserLimitService dynamicUserLimitService;
     private final WorkerService workerService;
     private final RecoveryService recoveryService;
+    private final TaskHandlerRegistry handlerRegistry;
     private final BusinessTaskStateProviderRegistry businessTaskStateProviderRegistry;
     private final TaskStateService taskStateService;
     private final ConcurrentHashMap<String, AtomicInteger> groupSummaryLogCounter = new ConcurrentHashMap<>();
@@ -49,6 +50,7 @@ public class DispatchService {
                            DynamicUserLimitService dynamicUserLimitService,
                            WorkerService workerService,
                            RecoveryService recoveryService,
+                           TaskHandlerRegistry handlerRegistry,
                            BusinessTaskStateProviderRegistry businessTaskStateProviderRegistry,
                            TaskStateService taskStateService) {
         this.properties = properties;
@@ -59,6 +61,7 @@ public class DispatchService {
         this.dynamicUserLimitService = dynamicUserLimitService;
         this.workerService = workerService;
         this.recoveryService = recoveryService;
+        this.handlerRegistry = handlerRegistry;
         this.businessTaskStateProviderRegistry = businessTaskStateProviderRegistry;
         this.taskStateService = taskStateService;
     }
@@ -81,13 +84,14 @@ public class DispatchService {
     private void dispatchGroup(GroupConfig cfg, long nowMillis) {
         long begin = System.currentTimeMillis();
         LocalDateTime now = LocalDateTime.now();
-        List<Long> dueTaskIds = queueRedisService.promoteDueTasks(cfg.getGroupCode(), nowMillis, cfg.getDispatchBatchSize());
+        String dispatchRoute = properties.getDispatchRoute();
+        List<Long> dueTaskIds = queueRedisService.promoteDueTasks(cfg.getGroupCode(), dispatchRoute, nowMillis, cfg.getDispatchBatchSize());
+        Map<Long, SchedulerTask> dueTasks = dueTaskIds.isEmpty() ? Map.of() : taskRepository.findByIds(dueTaskIds);
         int promoted = 0;
         for (Long taskId : dueTaskIds) {
             boolean addedToReady = false;
-            Optional<SchedulerTask> taskOpt = taskRepository.findById(taskId);
-            if (taskOpt.isPresent()) {
-                SchedulerTask task = taskOpt.get();
+            SchedulerTask task = dueTasks.get(taskId);
+            if (task != null) {
                 if (task.getStatus() == TaskStatus.PENDING) {
                     boolean promotedNow = taskRepository.markRunnableIfPending(task.getId(), now);
                     if (promotedNow) {
@@ -136,7 +140,7 @@ public class DispatchService {
                 break;
             }
 
-            List<Long> ready = queueRedisService.peekReady(cfg.getGroupCode(), offset, pageSize);
+            List<Long> ready = queueRedisService.peekReady(cfg.getGroupCode(), dispatchRoute, offset, pageSize);
             if (ready == null || ready.isEmpty()) {
                 break;
             }
@@ -151,14 +155,14 @@ public class DispatchService {
 
                 SchedulerTask task = readyTasks.get(taskId);
                 if (task == null) {
-                    queueRedisService.removeFromReady(cfg.getGroupCode(), taskId);
+                    queueRedisService.removeFromReady(cfg.getGroupCode(), dispatchRoute, taskId);
                     progressed = true;
                     skipped++;
                     log.debug("dispatch skip missing task, group={}, taskId={}", cfg.getGroupCode(), taskId);
                     continue;
                 }
                 if (!task.runnableStatus() || !task.due(now)) {
-                    queueRedisService.removeFromReady(cfg.getGroupCode(), taskId);
+                    queueRedisService.removeFromReady(cfg.getGroupCode(), dispatchRoute, taskId);
                     progressed = true;
                     skipped++;
                     log.debug("dispatch skip non-runnable/non-due, group={}, taskId={}, status={}, executeAt={}",
@@ -168,7 +172,7 @@ public class DispatchService {
 
                 if (task.waitingTimedOut(now)) {
                     boolean failed = taskStateService.markFailedByWaitDeadline(task.getId(), now);
-                    queueRedisService.removeFromReady(cfg.getGroupCode(), taskId);
+                    queueRedisService.removeFromReady(cfg.getGroupCode(), dispatchRoute, taskId);
                     progressed = true;
                     skipped++;
                     if (failed) {
@@ -178,12 +182,20 @@ public class DispatchService {
                     continue;
                 }
 
+                TaskHandler handler = handlerRegistry.find(task.getBizType());
+                if (handler == null) {
+                    skipped++;
+                    log.warn("dispatch skip task because no TaskHandler found in current service, taskId={}, taskNo={}, group={}, user={}, bizType={}",
+                            task.getId(), task.getTaskNo(), task.getGroupCode(), task.getUserId(), task.getBizType());
+                    continue;
+                }
+
                 BusinessTaskStateProvider stateProvider = businessTaskStateProviderRegistry.find(task.getBizType());
                 if (stateProvider != null) {
                     BusinessTaskState state = stateProvider.query(task);
                     if (state == BusinessTaskState.SUCCESS) {
                         taskStateService.markTerminalByBusinessState(task.getId(), TaskStatus.SUCCESS, now);
-                        queueRedisService.removeFromReady(cfg.getGroupCode(), taskId);
+                        queueRedisService.removeFromReady(cfg.getGroupCode(), dispatchRoute, taskId);
                         progressed = true;
                         skipped++;
                         log.info("dispatch short-circuit success by biz state, taskId={}, taskNo={}, group={}",
@@ -192,7 +204,7 @@ public class DispatchService {
                     }
                     if (state == BusinessTaskState.FAILED) {
                         taskStateService.markTerminalByBusinessState(task.getId(), TaskStatus.FAILED, now);
-                        queueRedisService.removeFromReady(cfg.getGroupCode(), taskId);
+                        queueRedisService.removeFromReady(cfg.getGroupCode(), dispatchRoute, taskId);
                         progressed = true;
                         skipped++;
                         log.info("dispatch short-circuit failed by biz state, taskId={}, taskNo={}, group={}",
@@ -208,7 +220,7 @@ public class DispatchService {
                                 "business state is " + state,
                                 now
                         );
-                        queueRedisService.removeFromReady(cfg.getGroupCode(), taskId);
+                        queueRedisService.removeFromReady(cfg.getGroupCode(), dispatchRoute, taskId);
                         progressed = true;
                         if (deferred) {
                             task.setExecuteAt(nextCheckAt);
@@ -269,7 +281,7 @@ public class DispatchService {
 
                 try {
                     workerService.submit(task, cfg, executeNo);
-                    queueRedisService.removeFromReady(cfg.getGroupCode(), task.getId());
+                    queueRedisService.removeFromReady(cfg.getGroupCode(), dispatchRoute, task.getId());
                     progressed = true;
                     groupRunning++;
                     dispatched++;
@@ -293,7 +305,7 @@ public class DispatchService {
                             ex.getClass().getSimpleName() + ":" + ex.getMessage(),
                             now
                     );
-                    queueRedisService.removeFromReady(cfg.getGroupCode(), task.getId());
+                    queueRedisService.removeFromReady(cfg.getGroupCode(), dispatchRoute, task.getId());
                     progressed = true;
                     if (rollback) {
                         task.setExecuteAt(nextCheckAt);

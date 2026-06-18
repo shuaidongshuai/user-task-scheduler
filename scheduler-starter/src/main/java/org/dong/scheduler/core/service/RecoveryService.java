@@ -102,15 +102,17 @@ public class RecoveryService {
 
     public int refillQueue() {
         ScheduledJobResult result = new ScheduledJobResult();
-        runWithScheduledJobLock(REFILL_JOB, "queue refill", () -> {
+        String dispatchRoute = properties.getDispatchRoute();
+        String refillJobName = (dispatchRoute == null || dispatchRoute.isBlank()) ? REFILL_JOB : REFILL_JOB + ":" + dispatchRoute;
+        runWithScheduledJobLock(refillJobName, "queue refill", () -> {
             LocalDateTime now = LocalDateTime.now();
-            taskRepository.promotePendingToRunnable(now, properties.getQueueRefillLimit());
-            List<SchedulerTask> list = taskRepository.findRunnableForQueueRefill(now, properties.getQueueRefillLimit());
+            taskRepository.promotePendingToRunnable(dispatchRoute, now, properties.getQueueRefillLimit());
+            List<SchedulerTask> list = taskRepository.findRunnableForQueueRefill(dispatchRoute, now, properties.getQueueRefillLimit());
             int refillTime = 0;
             int refillReady = 0;
             for (SchedulerTask task : list) {
                 if (task.getExecuteAt().isAfter(now)) {
-                    if (!queueRedisService.existsInTime(task.getGroupCode(), task.getId())) {
+                    if (!queueRedisService.existsInTime(task.getGroupCode(), task.getDispatchRoute(), task.getId())) {
                         queueRedisService.enqueue(task);
                         refillTime++;
                         log.info("queue refill task enqueued to time queue, taskId={}, taskNo={}, group={}, user={}, bizType={}, bizKey={}, executeAt={}, status={}",
@@ -120,14 +122,14 @@ public class RecoveryService {
                     continue;
                 }
 
-                if (!queueRedisService.existsInReady(task.getGroupCode(), task.getId())) {
+                if (!queueRedisService.existsInReady(task.getGroupCode(), task.getDispatchRoute(), task.getId())) {
                     queueRedisService.addToReady(task);
                     refillReady++;
                     log.info("queue refill task added to ready queue, taskId={}, taskNo={}, group={}, user={}, bizType={}, bizKey={}, executeAt={}, priority={}, status={}",
                             task.getId(), task.getTaskNo(), task.getGroupCode(), task.getUserId(), task.getBizType(),
                             task.getBizKey(), task.getExecuteAt(), task.getPriority(), task.getStatus());
                 }
-                queueRedisService.removeFromTime(task.getGroupCode(), task.getId());
+                queueRedisService.removeFromTime(task.getGroupCode(), task.getDispatchRoute(), task.getId());
             }
             if (refillTime > 0 || refillReady > 0) {
                 log.info("queue refill done, scanned={}, refillTime={}, refillReady={}", list.size(), refillTime, refillReady);

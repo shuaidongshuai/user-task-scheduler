@@ -4,10 +4,13 @@ import org.dong.scheduler.config.SchedulerProperties;
 import org.dong.scheduler.core.enums.TaskStatus;
 import org.dong.scheduler.core.model.GroupConfig;
 import org.dong.scheduler.core.model.SchedulerTask;
+import org.dong.scheduler.core.model.TaskExecuteResult;
 import org.dong.scheduler.core.redis.ConcurrencyGuard;
 import org.dong.scheduler.core.redis.QueueRedisService;
 import org.dong.scheduler.core.repo.GroupConfigRepository;
 import org.dong.scheduler.core.repo.TaskRepository;
+import org.dong.scheduler.core.spi.BusinessTaskStateProvider;
+import org.dong.scheduler.core.spi.TaskHandler;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -18,9 +21,9 @@ import org.springframework.core.task.TaskRejectedException;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
@@ -31,6 +34,7 @@ import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
 class DispatchServiceTest {
+    private static final String ROUTE = "route-a";
     private SchedulerProperties properties;
 
     @Mock
@@ -55,6 +59,18 @@ class DispatchServiceTest {
     @BeforeEach
     void setUp() {
         properties = new SchedulerProperties();
+        properties.setDispatchRoute(ROUTE);
+        TaskHandlerRegistry taskHandlerRegistry = new TaskHandlerRegistry(List.of(new TaskHandler() {
+            @Override
+            public List<String> bizTypes() {
+                return List.of("biz");
+            }
+
+            @Override
+            public TaskExecuteResult execute(SchedulerTask task) {
+                throw new UnsupportedOperationException("not used in dispatch tests");
+            }
+        }));
         BusinessTaskStateProviderRegistry providerRegistry = new BusinessTaskStateProviderRegistry(List.of());
         dispatchService = new DispatchService(
                 properties,
@@ -65,9 +81,59 @@ class DispatchServiceTest {
                 dynamicUserLimitService,
                 workerService,
                 recoveryService,
+                taskHandlerRegistry,
                 providerRegistry,
                 taskStateService
         );
+    }
+
+    @Test
+    void shouldSkipTaskWithoutHandlerBeforeCheckingBusinessState() {
+        GroupConfig group = new GroupConfig();
+        group.setGroupCode("g1");
+        group.setEnabled(true);
+        group.setMaxConcurrency(2);
+        group.setDispatchBatchSize(1);
+
+        SchedulerTask task = runnableTask(701L, "u1");
+        task.setBizType("demo.biz");
+
+        BusinessTaskStateProvider stateProvider = new BusinessTaskStateProvider() {
+            @Override
+            public String bizType() {
+                return "demo.biz";
+            }
+
+            @Override
+            public org.dong.scheduler.core.enums.BusinessTaskState query(SchedulerTask ignored) {
+                throw new AssertionError("state provider should not be queried when handler is missing");
+            }
+        };
+
+        dispatchService = new DispatchService(
+                properties,
+                groupConfigRepository,
+                taskRepository,
+                queueRedisService,
+                concurrencyGuard,
+                dynamicUserLimitService,
+                workerService,
+                recoveryService,
+                new TaskHandlerRegistry(List.of()),
+                new BusinessTaskStateProviderRegistry(List.of(stateProvider)),
+                taskStateService
+        );
+
+        when(groupConfigRepository.listEnabled()).thenReturn(List.of(group));
+        when(queueRedisService.promoteDueTasks(eq("g1"), eq(ROUTE), anyLong(), eq(1))).thenReturn(List.of());
+        when(concurrencyGuard.groupRunning("g1")).thenReturn(0L);
+        when(queueRedisService.peekReady("g1", ROUTE, 0, 1)).thenReturn(List.of(701L), List.of());
+        when(taskRepository.findByIds(List.of(701L))).thenReturn(Map.of(701L, task));
+
+        dispatchService.dispatchOnce();
+
+        verify(workerService, never()).newExecuteNo();
+        verify(concurrencyGuard, never()).tryAcquire(any(), any(), anyLong(), anyInt(), anyInt(), anyInt(), any());
     }
 
     @Test
@@ -87,9 +153,9 @@ class DispatchServiceTest {
         task.setExecuteAt(LocalDateTime.now().plusMinutes(1));
 
         when(groupConfigRepository.listEnabled()).thenReturn(List.of(group));
-        when(queueRedisService.promoteDueTasks(eq("g1"), anyLong(), eq(100)))
+        when(queueRedisService.promoteDueTasks(eq("g1"), eq(ROUTE), anyLong(), eq(100)))
                 .thenReturn(List.of(401L));
-        when(taskRepository.findById(401L)).thenReturn(Optional.of(task));
+        when(taskRepository.findByIds(List.of(401L))).thenReturn(Map.of(401L, task));
         when(concurrencyGuard.groupRunning("g1")).thenReturn(10L);
 
         dispatchService.dispatchOnce();
@@ -113,10 +179,10 @@ class DispatchServiceTest {
         SchedulerTask saturatedThird = runnableTask(104L, "u-full");
 
         when(groupConfigRepository.listEnabled()).thenReturn(List.of(group));
-        when(queueRedisService.promoteDueTasks(eq("g1"), anyLong(), eq(2))).thenReturn(List.of());
+        when(queueRedisService.promoteDueTasks(eq("g1"), eq(ROUTE), anyLong(), eq(2))).thenReturn(List.of());
         when(concurrencyGuard.groupRunning("g1")).thenReturn(3L, 3L, 3L, 3L, 5L);
-        when(queueRedisService.peekReady("g1", 0, 2)).thenReturn(List.of(101L, 102L));
-        when(queueRedisService.peekReady("g1", 2, 2)).thenReturn(List.of(103L, 104L));
+        when(queueRedisService.peekReady("g1", ROUTE, 0, 2)).thenReturn(List.of(101L, 102L));
+        when(queueRedisService.peekReady("g1", ROUTE, 2, 2)).thenReturn(List.of(103L, 104L));
         when(taskRepository.findByIds(List.of(101L, 102L))).thenReturn(Map.of(
                 101L, saturatedFirst,
                 102L, saturatedSecond
@@ -139,9 +205,9 @@ class DispatchServiceTest {
         verify(concurrencyGuard, never()).tryAcquire(eq("g1"), eq("u-full"), eq(102L), eq(5), eq(3), eq(60), eq("exec-104"));
         verify(concurrencyGuard, never()).tryAcquire(eq("g1"), eq("u-full"), eq(104L), eq(5), eq(3), eq(60), eq("exec-104"));
         verify(workerService).submit(runnableOtherUser, group, "exec-104");
-        verify(queueRedisService).removeFromReady("g1", 103L);
-        verify(queueRedisService).peekReady("g1", 0, 2);
-        verify(queueRedisService).peekReady("g1", 2, 2);
+        verify(queueRedisService).removeFromReady("g1", ROUTE, 103L);
+        verify(queueRedisService).peekReady("g1", ROUTE, 0, 2);
+        verify(queueRedisService).peekReady("g1", ROUTE, 2, 2);
         verify(taskRepository).findByIds(List.of(101L, 102L));
         verify(taskRepository).findByIds(List.of(103L, 104L));
         verify(workerService, times(2)).newExecuteNo();
@@ -156,13 +222,13 @@ class DispatchServiceTest {
         group.setDispatchBatchSize(2);
 
         when(groupConfigRepository.listEnabled()).thenReturn(List.of(group));
-        when(queueRedisService.promoteDueTasks(eq("g1"), anyLong(), eq(2))).thenReturn(List.of());
+        when(queueRedisService.promoteDueTasks(eq("g1"), eq(ROUTE), anyLong(), eq(2))).thenReturn(List.of());
         when(concurrencyGuard.groupRunning("g1")).thenReturn(0L);
-        when(queueRedisService.peekReady("g1", 0, 2)).thenReturn(List.of());
+        when(queueRedisService.peekReady("g1", ROUTE, 0, 2)).thenReturn(List.of());
 
         dispatchService.dispatchOnce();
 
-        verify(queueRedisService).peekReady("g1", 0, 2);
+        verify(queueRedisService).peekReady("g1", ROUTE, 0, 2);
     }
 
     @Test
@@ -180,10 +246,10 @@ class DispatchServiceTest {
         SchedulerTask second = runnableTask(302L, "u-full");
 
         when(groupConfigRepository.listEnabled()).thenReturn(List.of(group));
-        when(queueRedisService.promoteDueTasks(eq("g1"), anyLong(), eq(1))).thenReturn(List.of());
+        when(queueRedisService.promoteDueTasks(eq("g1"), eq(ROUTE), anyLong(), eq(1))).thenReturn(List.of());
         when(concurrencyGuard.groupRunning("g1")).thenReturn(0L, 0L, 0L);
-        when(queueRedisService.peekReady("g1", 0, 1)).thenReturn(List.of(301L));
-        when(queueRedisService.peekReady("g1", 1, 1)).thenReturn(List.of(302L));
+        when(queueRedisService.peekReady("g1", ROUTE, 0, 1)).thenReturn(List.of(301L));
+        when(queueRedisService.peekReady("g1", ROUTE, 1, 1)).thenReturn(List.of(302L));
         when(taskRepository.findByIds(List.of(301L))).thenReturn(Map.of(301L, first));
         when(taskRepository.findByIds(List.of(302L))).thenReturn(Map.of(302L, second));
         when(dynamicUserLimitService.calculate(group, 0L)).thenReturn(1);
@@ -194,9 +260,9 @@ class DispatchServiceTest {
 
         dispatchService.dispatchOnce();
 
-        verify(queueRedisService).peekReady("g1", 0, 1);
-        verify(queueRedisService).peekReady("g1", 1, 1);
-        verify(queueRedisService, never()).peekReady("g1", 2, 1);
+        verify(queueRedisService).peekReady("g1", ROUTE, 0, 1);
+        verify(queueRedisService).peekReady("g1", ROUTE, 1, 1);
+        verify(queueRedisService, never()).peekReady("g1", ROUTE, 2, 1);
     }
 
     @Test
@@ -212,9 +278,9 @@ class DispatchServiceTest {
         SchedulerTask second = runnableTask(202L, "u2");
 
         when(groupConfigRepository.listEnabled()).thenReturn(List.of(group));
-        when(queueRedisService.promoteDueTasks(eq("g1"), anyLong(), eq(1))).thenReturn(List.of());
+        when(queueRedisService.promoteDueTasks(eq("g1"), eq(ROUTE), anyLong(), eq(1))).thenReturn(List.of());
         when(concurrencyGuard.groupRunning("g1")).thenReturn(0L, 0L, 1L);
-        when(queueRedisService.peekReady("g1", 0, 1)).thenReturn(List.of(201L), List.of(202L));
+        when(queueRedisService.peekReady("g1", ROUTE, 0, 1)).thenReturn(List.of(201L), List.of(202L));
         when(taskRepository.findByIds(List.of(201L))).thenReturn(Map.of(201L, first));
         when(taskRepository.findByIds(List.of(202L))).thenReturn(Map.of(202L, second));
         when(dynamicUserLimitService.calculate(group, 0L)).thenReturn(1);
@@ -229,7 +295,7 @@ class DispatchServiceTest {
 
         dispatchService.dispatchOnce();
 
-        verify(queueRedisService, times(2)).peekReady("g1", 0, 1);
+        verify(queueRedisService, times(2)).peekReady("g1", ROUTE, 0, 1);
         verify(taskRepository).findByIds(List.of(201L));
         verify(taskRepository).findByIds(List.of(202L));
         verify(workerService).submit(first, group, "exec-201");
@@ -248,9 +314,9 @@ class DispatchServiceTest {
         timedOut.setWaitDeadlineAt(LocalDateTime.now().minusSeconds(1));
 
         when(groupConfigRepository.listEnabled()).thenReturn(List.of(group));
-        when(queueRedisService.promoteDueTasks(eq("g1"), anyLong(), eq(1))).thenReturn(List.of());
+        when(queueRedisService.promoteDueTasks(eq("g1"), eq(ROUTE), anyLong(), eq(1))).thenReturn(List.of());
         when(concurrencyGuard.groupRunning("g1")).thenReturn(0L);
-        when(queueRedisService.peekReady("g1", 0, 1)).thenReturn(List.of(501L), List.of());
+        when(queueRedisService.peekReady("g1", ROUTE, 0, 1)).thenReturn(List.of(501L), List.of());
         when(taskRepository.findByIds(List.of(501L))).thenReturn(Map.of(501L, timedOut));
         when(taskStateService.markFailedByWaitDeadline(eq(501L), any(LocalDateTime.class))).thenReturn(true);
 
@@ -258,7 +324,7 @@ class DispatchServiceTest {
 
         verify(taskRepository).findByIds(List.of(501L));
         verify(taskStateService).markFailedByWaitDeadline(eq(501L), any(LocalDateTime.class));
-        verify(queueRedisService).removeFromReady("g1", 501L);
+        verify(queueRedisService).removeFromReady("g1", ROUTE, 501L);
         verify(workerService, never()).submit(any(), eq(group), any());
     }
 
@@ -275,9 +341,9 @@ class DispatchServiceTest {
         SchedulerTask second = runnableTask(602L, "u2");
 
         when(groupConfigRepository.listEnabled()).thenReturn(List.of(group));
-        when(queueRedisService.promoteDueTasks(eq("g1"), anyLong(), eq(2))).thenReturn(List.of());
+        when(queueRedisService.promoteDueTasks(eq("g1"), eq(ROUTE), anyLong(), eq(2))).thenReturn(List.of());
         when(concurrencyGuard.groupRunning("g1")).thenReturn(0L, 0L);
-        when(queueRedisService.peekReady("g1", 0, 2)).thenReturn(List.of(601L, 602L));
+        when(queueRedisService.peekReady("g1", ROUTE, 0, 2)).thenReturn(List.of(601L, 602L));
         when(taskRepository.findByIds(List.of(601L, 602L))).thenReturn(Map.of(
                 601L, first,
                 602L, second
@@ -298,7 +364,7 @@ class DispatchServiceTest {
         verify(workerService).submit(first, group, "exec-601");
         verify(workerService, never()).submit(second, group, "exec-602");
         verify(taskRepository, never()).casToRunning(eq(602L), eq(null), eq(Thread.currentThread().getName()), any(LocalDateTime.class));
-        verify(queueRedisService).removeFromReady("g1", 601L);
+        verify(queueRedisService).removeFromReady("g1", ROUTE, 601L);
         verify(queueRedisService).enqueue(first);
     }
 

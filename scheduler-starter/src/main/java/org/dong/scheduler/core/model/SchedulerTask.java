@@ -10,6 +10,7 @@ public class SchedulerTask {
     private Long id;
     private String taskNo;
     private String groupCode;
+    private String dispatchRoute;
     private String userId;
     private String bizType;
     private String bizKey;

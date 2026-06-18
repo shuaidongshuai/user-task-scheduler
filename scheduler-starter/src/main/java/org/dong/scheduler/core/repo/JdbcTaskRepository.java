@@ -31,45 +31,50 @@ public class JdbcTaskRepository implements TaskRepository {
         jdbcTemplate.update(connection -> {
             PreparedStatement ps = connection.prepareStatement("""
                     insert into scheduler_task(
-                        task_no, group_code, user_id, biz_type, biz_key,
+                        task_no, group_code, dispatch_route, user_id, biz_type, biz_key,
                         status, priority, execute_at, next_retry_at,
                         retry_count, max_retry_count, execute_timeout_sec, retry_delay_sec, max_wait_sec, wait_deadline_at,
                         version, ext_info, create_time, update_time
-                    ) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,now(),now())
+                    ) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,now(),now())
                     """, Statement.RETURN_GENERATED_KEYS);
             ps.setString(1, taskNo);
             ps.setString(2, request.getGroupCode());
-            ps.setString(3, request.getUserId());
-            ps.setString(4, request.getBizType());
-            ps.setString(5, request.getBizKey());
-            ps.setString(6, status.name());
-            ps.setInt(7, request.getPriority());
-            ps.setTimestamp(8, Timestamp.valueOf(request.getExecuteAt()));
-            ps.setTimestamp(9, null);
-            ps.setInt(10, 0);
-            ps.setInt(11, request.getMaxRetryCount());
-            if (request.getExecuteTimeoutSec() == null) {
-                ps.setObject(12, null);
+            if (request.getDispatchRoute() == null || request.getDispatchRoute().isBlank()) {
+                ps.setObject(3, null);
             } else {
-                ps.setInt(12, request.getExecuteTimeoutSec());
+                ps.setString(3, request.getDispatchRoute());
             }
-            if (request.getRetryDelaySec() == null) {
+            ps.setString(4, request.getUserId());
+            ps.setString(5, request.getBizType());
+            ps.setString(6, request.getBizKey());
+            ps.setString(7, status.name());
+            ps.setInt(8, request.getPriority());
+            ps.setTimestamp(9, Timestamp.valueOf(request.getExecuteAt()));
+            ps.setTimestamp(10, null);
+            ps.setInt(11, 0);
+            ps.setInt(12, request.getMaxRetryCount());
+            if (request.getExecuteTimeoutSec() == null) {
                 ps.setObject(13, null);
             } else {
-                ps.setInt(13, request.getRetryDelaySec());
+                ps.setInt(13, request.getExecuteTimeoutSec());
             }
-            if (request.getMaxWaitSec() == null) {
+            if (request.getRetryDelaySec() == null) {
                 ps.setObject(14, null);
             } else {
-                ps.setInt(14, request.getMaxWaitSec());
+                ps.setInt(14, request.getRetryDelaySec());
+            }
+            if (request.getMaxWaitSec() == null) {
+                ps.setObject(15, null);
+            } else {
+                ps.setInt(15, request.getMaxWaitSec());
             }
             if (request.getWaitDeadlineAt() == null) {
-                ps.setTimestamp(15, null);
+                ps.setTimestamp(16, null);
             } else {
-                ps.setTimestamp(15, Timestamp.valueOf(request.getWaitDeadlineAt()));
+                ps.setTimestamp(16, Timestamp.valueOf(request.getWaitDeadlineAt()));
             }
-            ps.setInt(16, 0);
-            ps.setString(17, extInfo);
+            ps.setInt(17, 0);
+            ps.setString(18, extInfo);
             return ps;
         }, keyHolder);
         return Objects.requireNonNull(keyHolder.getKey()).longValue();
@@ -220,12 +225,21 @@ public class JdbcTaskRepository implements TaskRepository {
     }
 
     @Override
-    public List<SchedulerTask> findRunnableForQueueRefill(LocalDateTime now, int limit) {
+    public List<SchedulerTask> findRunnableForQueueRefill(String dispatchRoute, LocalDateTime now, int limit) {
+        if (dispatchRoute == null || dispatchRoute.isBlank()) {
+            return jdbcTemplate.query("""
+                    select * from scheduler_task
+                     where dispatch_route is null
+                       and status in ('RUNNABLE','WAIT_RETRY')
+                     order by execute_at asc limit ?
+                    """, this::mapTask, limit);
+        }
         return jdbcTemplate.query("""
                 select * from scheduler_task
-                 where status in ('RUNNABLE','WAIT_RETRY')
+                 where dispatch_route = ?
+                   and status in ('RUNNABLE','WAIT_RETRY')
                  order by execute_at asc limit ?
-                """, this::mapTask, limit);
+                """, this::mapTask, dispatchRoute, limit);
     }
 
     @Override
@@ -241,14 +255,37 @@ public class JdbcTaskRepository implements TaskRepository {
     }
 
     @Override
-    public void promotePendingToRunnable(LocalDateTime now, int limit) {
+    public void promotePendingToRunnable(String dispatchRoute, LocalDateTime now, int limit) {
+        if (dispatchRoute == null || dispatchRoute.isBlank()) {
+            jdbcTemplate.update("""
+                    update scheduler_task
+                       set status='RUNNABLE', update_time=now(), version=version+1
+                     where id in (
+                        select id from (
+                            select id from scheduler_task
+                             where dispatch_route is null
+                               and status='PENDING'
+                               and execute_at <= ?
+                               and not exists (
+                                   select 1 from scheduler_task_dependency d
+                                    where d.task_id = scheduler_task.id
+                                      and d.status in ('WAITING', 'IMPOSSIBLE')
+                               )
+                             order by execute_at asc
+                             limit ?
+                        ) t
+                     )
+                    """, Timestamp.valueOf(now), limit);
+            return;
+        }
         jdbcTemplate.update("""
                 update scheduler_task
                    set status='RUNNABLE', update_time=now(), version=version+1
                  where id in (
                     select id from (
                         select id from scheduler_task
-                         where status='PENDING'
+                         where dispatch_route = ?
+                           and status='PENDING'
                            and execute_at <= ?
                            and not exists (
                                select 1 from scheduler_task_dependency d
@@ -259,7 +296,7 @@ public class JdbcTaskRepository implements TaskRepository {
                          limit ?
                     ) t
                  )
-                """, Timestamp.valueOf(now), limit);
+                """, dispatchRoute, Timestamp.valueOf(now), limit);
     }
 
     @Override
@@ -344,6 +381,7 @@ public class JdbcTaskRepository implements TaskRepository {
         task.setId(rs.getLong("id"));
         task.setTaskNo(rs.getString("task_no"));
         task.setGroupCode(rs.getString("group_code"));
+        task.setDispatchRoute(rs.getString("dispatch_route"));
         task.setUserId(rs.getString("user_id"));
         task.setBizType(rs.getString("biz_type"));
         task.setBizKey(rs.getString("biz_key"));

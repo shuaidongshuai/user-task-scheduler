@@ -7,6 +7,7 @@ CREATE TABLE IF NOT EXISTS scheduler_task (
     id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键ID',
     task_no VARCHAR(64) NOT NULL UNIQUE COMMENT '任务唯一号（调度内部唯一键）',
     group_code VARCHAR(64) NOT NULL COMMENT '任务组编码',
+    dispatch_route VARCHAR(64) DEFAULT NULL COMMENT '调度路由（决定由哪类服务消费，为空表示兼容旧队列）',
     user_id VARCHAR(64) NOT NULL COMMENT '用户ID',
     biz_type VARCHAR(64) NOT NULL COMMENT '业务类型（匹配TaskHandler）',
     biz_key VARCHAR(128) NOT NULL COMMENT '业务键（可重复，用于业务侧关联）',
@@ -42,7 +43,8 @@ CREATE TABLE IF NOT EXISTS scheduler_task (
     create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
 
-    INDEX idx_group_status_time (group_code, status, execute_at),
+    INDEX idx_group_route_status_time (group_code, dispatch_route, status, execute_at),
+    INDEX idx_route_status_time (dispatch_route, status, execute_at),
     INDEX idx_status_time (status, execute_at),
     INDEX idx_status_wait_deadline (status, wait_deadline_at),
     INDEX idx_user_group_status (user_id, group_code, status),

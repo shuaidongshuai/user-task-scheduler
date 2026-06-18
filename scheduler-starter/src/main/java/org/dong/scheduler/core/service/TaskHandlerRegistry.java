@@ -1,6 +1,7 @@
 package org.dong.scheduler.core.service;
 
 import org.dong.scheduler.core.spi.TaskHandler;
+import org.springframework.beans.factory.ObjectProvider;
 
 import java.util.LinkedHashSet;
 import java.util.HashMap;
@@ -9,9 +10,43 @@ import java.util.Map;
 import java.util.Set;
 
 public class TaskHandlerRegistry {
-    private final Map<String, TaskHandler> handlers;
+    private final ObjectProvider<TaskHandler> handlerProvider;
+    private volatile Map<String, TaskHandler> handlers;
 
     public TaskHandlerRegistry(List<TaskHandler> handlers) {
+        this.handlerProvider = null;
+        this.handlers = buildIndex(handlers);
+    }
+
+    public TaskHandlerRegistry(ObjectProvider<TaskHandler> handlerProvider) {
+        this.handlerProvider = handlerProvider;
+        this.handlers = null;
+    }
+
+    public TaskHandler find(String bizType) {
+        return handlers().get(bizType);
+    }
+
+    private Map<String, TaskHandler> handlers() {
+        Map<String, TaskHandler> current = handlers;
+        if (current != null) {
+            return current;
+        }
+        synchronized (this) {
+            current = handlers;
+            if (current == null) {
+                if (handlerProvider == null) {
+                    current = Map.of();
+                } else {
+                    current = buildIndex(handlerProvider.orderedStream().toList());
+                }
+                handlers = current;
+            }
+        }
+        return current;
+    }
+
+    private Map<String, TaskHandler> buildIndex(List<TaskHandler> handlers) {
         Map<String, TaskHandler> index = new HashMap<>();
         for (TaskHandler handler : handlers) {
             for (String bizType : resolveBizTypes(handler)) {
@@ -23,11 +58,7 @@ public class TaskHandlerRegistry {
                 }
             }
         }
-        this.handlers = Map.copyOf(index);
-    }
-
-    public TaskHandler find(String bizType) {
-        return handlers.get(bizType);
+        return Map.copyOf(index);
     }
 
     private List<String> resolveBizTypes(TaskHandler handler) {

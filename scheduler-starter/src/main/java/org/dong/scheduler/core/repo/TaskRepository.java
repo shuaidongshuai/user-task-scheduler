@@ -42,11 +42,11 @@ public interface TaskRepository {
 
     List<SchedulerTask> findRunningHeartbeatTimeout(String groupCode, LocalDateTime cutoff, int limit);
 
-    List<SchedulerTask> findRunnableForQueueRefill(LocalDateTime now, int limit);
+    List<SchedulerTask> findRunnableForQueueRefill(String dispatchRoute, LocalDateTime now, int limit);
 
     List<Long> findWaitingTimeoutTaskIds(LocalDateTime now, int limit);
 
-    void promotePendingToRunnable(LocalDateTime now, int limit);
+    void promotePendingToRunnable(String dispatchRoute, LocalDateTime now, int limit);
 
     boolean markRunnableIfPending(Long id, LocalDateTime now);
 

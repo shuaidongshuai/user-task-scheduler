@@ -58,6 +58,7 @@ class DefaultSchedulerClientTest {
     void setUp() {
         SchedulerProperties properties = new SchedulerProperties();
         properties.setDefaultGroupCode("default-group");
+        properties.setDispatchRoute("route-a");
         properties.setInstanceId("ins-test");
         schedulerClient = new DefaultSchedulerClient(taskRepository, queueRedisService, properties, taskStateService,
                 groupConfigRepository, dynamicUserLimitService, concurrencyGuard, workerService);
@@ -97,6 +98,56 @@ class DefaultSchedulerClientTest {
         verify(taskStateService).submitDirect(anyString(), any(TaskSubmitRequest.class), eq(groupConfig), eq(2),
                 eq("ins-test"), anyString(), anyString());
         verify(workerService).executeDirect(eq(runningTask), eq(groupConfig), anyString());
+    }
+
+    @Test
+    void shouldDefaultDispatchRouteFromLocalServiceConfig() {
+        TaskSubmitRequest request = new TaskSubmitRequest()
+                .setUserId("u1")
+                .setBizType("demo.biz")
+                .setBizKey("biz-a")
+                .setExecuteAt(LocalDateTime.now());
+        when(taskStateService.submit(anyString(), any(TaskSubmitRequest.class))).thenReturn(101L);
+        SchedulerTask task = new SchedulerTask();
+        task.setId(101L);
+        task.setTaskNo("task-101");
+        task.setStatus(org.dong.scheduler.core.enums.TaskStatus.RUNNABLE);
+        task.setExecuteAt(LocalDateTime.now());
+        when(taskRepository.findById(101L)).thenReturn(Optional.of(task));
+
+        schedulerClient.submit(request);
+
+        ArgumentCaptor<TaskSubmitRequest> captor = ArgumentCaptor.forClass(TaskSubmitRequest.class);
+        verify(taskStateService).submit(anyString(), captor.capture());
+        assertEquals("route-a", captor.getValue().getDispatchRoute());
+        assertEquals("default-group", captor.getValue().getGroupCode());
+    }
+
+    @Test
+    void shouldKeepDispatchRouteNullWhenLocalServiceConfigIsBlank() {
+        SchedulerProperties properties = new SchedulerProperties();
+        properties.setDefaultGroupCode("default-group");
+        properties.setInstanceId("ins-test");
+        schedulerClient = new DefaultSchedulerClient(taskRepository, queueRedisService, properties, taskStateService,
+                groupConfigRepository, dynamicUserLimitService, concurrencyGuard, workerService);
+        TaskSubmitRequest request = new TaskSubmitRequest()
+                .setUserId("u1")
+                .setBizType("demo.biz")
+                .setBizKey("biz-a")
+                .setExecuteAt(LocalDateTime.now());
+        when(taskStateService.submit(anyString(), any(TaskSubmitRequest.class))).thenReturn(101L);
+        SchedulerTask task = new SchedulerTask();
+        task.setId(101L);
+        task.setTaskNo("task-101");
+        task.setStatus(org.dong.scheduler.core.enums.TaskStatus.RUNNABLE);
+        task.setExecuteAt(LocalDateTime.now());
+        when(taskRepository.findById(101L)).thenReturn(Optional.of(task));
+
+        schedulerClient.submit(request);
+
+        ArgumentCaptor<TaskSubmitRequest> captor = ArgumentCaptor.forClass(TaskSubmitRequest.class);
+        verify(taskStateService).submit(anyString(), captor.capture());
+        assertEquals(null, captor.getValue().getDispatchRoute());
     }
 
     @Test
@@ -231,8 +282,10 @@ class DefaultSchedulerClientTest {
         List<TaskStateService.BatchSubmitCommand> commands = captor.getValue();
         assertEquals(2, commands.size());
         assertEquals("default-group", commands.getFirst().request().getGroupCode());
+        assertEquals("route-a", commands.getFirst().request().getDispatchRoute());
         assertEquals(0, commands.getFirst().request().getPriority());
         assertEquals("g1", commands.get(1).request().getGroupCode());
+        assertEquals("route-a", commands.get(1).request().getDispatchRoute());
         assertEquals(0, commands.get(1).request().getMaxRetryCount());
         assertEquals(0, commands.get(1).request().getRetryDelaySec());
     }

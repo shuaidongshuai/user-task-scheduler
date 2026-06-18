@@ -44,6 +44,7 @@ class RecoveryServiceQueueRefillTest {
         properties.setInstanceId("ins-test");
         properties.setScheduledJobLockSec(10);
         properties.setQueueRefillLimit(500);
+        properties.setDispatchRoute("route-a");
         recoveryService = new RecoveryService(properties, taskRepository, concurrencyGuard, queueRedisService, taskStateService);
     }
 
@@ -54,6 +55,7 @@ class RecoveryServiceQueueRefillTest {
         task.setId(301L);
         task.setTaskNo("task-301");
         task.setGroupCode("g1");
+        task.setDispatchRoute("route-a");
         task.setUserId("u1");
         task.setBizType("demo.biz");
         task.setBizKey("biz-301");
@@ -61,18 +63,18 @@ class RecoveryServiceQueueRefillTest {
         task.setStatus(TaskStatus.RUNNABLE);
         task.setExecuteAt(now.minusSeconds(5));
 
-        when(concurrencyGuard.tryAcquireJobLock(eq("refill-queue"), any(), eq(10))).thenReturn(true);
-        when(taskRepository.findRunnableForQueueRefill(any(LocalDateTime.class), eq(500))).thenReturn(List.of(task));
-        when(queueRedisService.existsInReady("g1", 301L)).thenReturn(false);
+        when(concurrencyGuard.tryAcquireJobLock(eq("refill-queue:route-a"), any(), eq(10))).thenReturn(true);
+        when(taskRepository.findRunnableForQueueRefill(eq("route-a"), any(LocalDateTime.class), eq(500))).thenReturn(List.of(task));
+        when(queueRedisService.existsInReady("g1", "route-a", 301L)).thenReturn(false);
 
         int refilled = recoveryService.refillQueue();
 
         assertEquals(1, refilled);
-        verify(taskRepository).promotePendingToRunnable(any(LocalDateTime.class), eq(500));
+        verify(taskRepository).promotePendingToRunnable(eq("route-a"), any(LocalDateTime.class), eq(500));
         verify(queueRedisService).addToReady(task);
-        verify(queueRedisService).removeFromTime("g1", 301L);
+        verify(queueRedisService).removeFromTime("g1", "route-a", 301L);
         verify(queueRedisService, never()).enqueue(task);
-        verify(concurrencyGuard).releaseJobLock(eq("refill-queue"), any());
+        verify(concurrencyGuard).releaseJobLock(eq("refill-queue:route-a"), any());
     }
 
     @Test
@@ -82,6 +84,7 @@ class RecoveryServiceQueueRefillTest {
         task.setId(302L);
         task.setTaskNo("task-302");
         task.setGroupCode("g1");
+        task.setDispatchRoute("route-a");
         task.setUserId("u1");
         task.setBizType("demo.biz");
         task.setBizKey("biz-302");
@@ -89,29 +92,29 @@ class RecoveryServiceQueueRefillTest {
         task.setStatus(TaskStatus.RUNNABLE);
         task.setExecuteAt(now.plusMinutes(1));
 
-        when(concurrencyGuard.tryAcquireJobLock(eq("refill-queue"), any(), eq(10))).thenReturn(true);
-        when(taskRepository.findRunnableForQueueRefill(any(LocalDateTime.class), eq(500))).thenReturn(List.of(task));
-        when(queueRedisService.existsInTime("g1", 302L)).thenReturn(false);
+        when(concurrencyGuard.tryAcquireJobLock(eq("refill-queue:route-a"), any(), eq(10))).thenReturn(true);
+        when(taskRepository.findRunnableForQueueRefill(eq("route-a"), any(LocalDateTime.class), eq(500))).thenReturn(List.of(task));
+        when(queueRedisService.existsInTime("g1", "route-a", 302L)).thenReturn(false);
 
         int refilled = recoveryService.refillQueue();
 
         assertEquals(1, refilled);
-        verify(taskRepository).promotePendingToRunnable(any(LocalDateTime.class), eq(500));
+        verify(taskRepository).promotePendingToRunnable(eq("route-a"), any(LocalDateTime.class), eq(500));
         verify(queueRedisService).enqueue(task);
         verify(queueRedisService, never()).addToReady(task);
-        verify(queueRedisService, never()).removeFromTime("g1", 302L);
-        verify(concurrencyGuard).releaseJobLock(eq("refill-queue"), any());
+        verify(queueRedisService, never()).removeFromTime("g1", "route-a", 302L);
+        verify(concurrencyGuard).releaseJobLock(eq("refill-queue:route-a"), any());
     }
 
     @Test
     void shouldSkipRefillQueueWhenJobLockBusy() {
-        when(concurrencyGuard.tryAcquireJobLock(eq("refill-queue"), any(), anyInt())).thenReturn(false);
+        when(concurrencyGuard.tryAcquireJobLock(eq("refill-queue:route-a"), any(), anyInt())).thenReturn(false);
 
         int refilled = recoveryService.refillQueue();
 
         assertEquals(0, refilled);
-        verify(taskRepository, never()).promotePendingToRunnable(any(LocalDateTime.class), anyInt());
-        verify(taskRepository, never()).findRunnableForQueueRefill(any(LocalDateTime.class), anyInt());
-        verify(concurrencyGuard, never()).releaseJobLock(eq("refill-queue"), any());
+        verify(taskRepository, never()).promotePendingToRunnable(eq("route-a"), any(LocalDateTime.class), anyInt());
+        verify(taskRepository, never()).findRunnableForQueueRefill(eq("route-a"), any(LocalDateTime.class), anyInt());
+        verify(concurrencyGuard, never()).releaseJobLock(eq("refill-queue:route-a"), any());
     }
 }

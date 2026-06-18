@@ -164,6 +164,11 @@ public class DefaultSchedulerClient implements SchedulerClient {
         if (request.getGroupCode() == null || request.getGroupCode().isBlank()) {
             request.setGroupCode(properties.getDefaultGroupCode());
         }
+        if ((request.getDispatchRoute() == null || request.getDispatchRoute().isBlank())
+                && properties.getDispatchRoute() != null
+                && !properties.getDispatchRoute().isBlank()) {
+            request.setDispatchRoute(properties.getDispatchRoute());
+        }
         requireText(request.getGroupCode(), "groupCode is required");
         requireText(request.getUserId(), "userId is required");
         requireText(request.getBizType(), "bizType is required");
@@ -243,6 +248,7 @@ public class DefaultSchedulerClient implements SchedulerClient {
             }
             TaskSubmitRequest base = normalizeBase(new TaskSubmitRequest()
                     .setGroupCode(task.getGroupCode())
+                    .setDispatchRoute(task.getDispatchRoute())
                     .setUserId(task.getUserId())
                     .setBizType(task.getBizType())
                     .setBizKey(task.getBizKey())

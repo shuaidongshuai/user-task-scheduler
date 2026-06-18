@@ -33,6 +33,10 @@ public class BatchSubmitTaskRequest {
      */
     private String groupCode;
     /**
+     * 调度路由（可选，未传时回退到 utask.scheduler.dispatch-route）。
+     */
+    private String dispatchRoute;
+    /**
      * 用户ID（必填）。
      */
     private String userId;
