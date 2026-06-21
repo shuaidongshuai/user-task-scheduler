@@ -44,6 +44,8 @@ public interface TaskRepository {
 
     List<SchedulerTask> findRunnableForQueueRefill(String dispatchRoute, LocalDateTime now, int limit);
 
+    List<SchedulerTask> findPendingForTimeQueueRefill(String dispatchRoute, LocalDateTime now, int limit);
+
     List<Long> findWaitingTimeoutTaskIds(LocalDateTime now, int limit);
 
     void promotePendingToRunnable(String dispatchRoute, LocalDateTime now, int limit);

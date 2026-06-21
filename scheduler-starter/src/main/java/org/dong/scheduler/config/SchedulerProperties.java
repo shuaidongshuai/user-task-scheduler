@@ -3,6 +3,8 @@ package org.dong.scheduler.config;
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
+import java.time.LocalDateTime;
+
 @Data
 @ConfigurationProperties(prefix = "utask.scheduler")
 public class SchedulerProperties {
@@ -20,7 +22,7 @@ public class SchedulerProperties {
     private String dispatchRoute;
     private int defaultGroupMaxConcurrency = 100;
     private int defaultGroupUserBaseConcurrency = 4;
-    private int defaultGroupDispatchBatchSize = 100;
+    private int defaultGroupDispatchBatchSize = 20;
     private int defaultGroupHeartbeatTimeoutSec = 90;
     private int defaultGroupLockExpireSec = 120;
     private String defaultGroupDescription = "auto initialized default public group";
@@ -34,6 +36,8 @@ public class SchedulerProperties {
     private int readyScanPageLimit = 10;
     private int recoveryScanLimit = 200;
     private int queueRefillLimit = 500;
+    private int activeUserLockTtlMs = 5_000;
+    private LocalDateTime priorityBaseEpoch = LocalDateTime.of(2026, 1, 1, 0, 0);
     private int workerThreads = 16;
     private int maxWorkerThreads = 200;
     /**

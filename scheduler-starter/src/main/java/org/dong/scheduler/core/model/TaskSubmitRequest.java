@@ -44,7 +44,7 @@ public class TaskSubmitRequest {
      */
     private String bizKey;
     /**
-     * 优先级，值越大越优先，默认 0（有效范围 0~99999，超出会被自动截断）。
+     * 优先级，值越小越优先，默认 0（有效范围 0~99，超出会被自动截断到边界值）。
      */
     private Integer priority;
     /**

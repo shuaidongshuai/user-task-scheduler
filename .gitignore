@@ -49,3 +49,6 @@ build/
 /.codegraph/
 /.idea/
 /.obsidian/
+/.idea/
+/.cursor/
+/.claude/

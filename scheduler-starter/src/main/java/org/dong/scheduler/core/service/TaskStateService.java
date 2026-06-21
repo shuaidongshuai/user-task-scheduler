@@ -262,7 +262,7 @@ public class TaskStateService {
     private void routeTaskToQueue(SchedulerTask task) {
         LocalDateTime now = LocalDateTime.now();
         if (task.runnableStatus() && task.due(now)) {
-            queueRedisService.addToReady(task);
+            queueRedisService.enqueueReady(task);
             return;
         }
         queueRedisService.enqueue(task);

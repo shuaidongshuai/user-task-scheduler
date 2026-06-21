@@ -18,8 +18,6 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.List;
 import java.util.Map;
-import java.util.HashSet;
-import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -83,7 +81,6 @@ public class DispatchService {
 
     private void dispatchGroup(GroupConfig cfg, long nowMillis) {
         long begin = System.currentTimeMillis();
-        LocalDateTime now = LocalDateTime.now();
         String dispatchRoute = properties.getDispatchRoute();
         List<Long> dueTaskIds = queueRedisService.promoteDueTasks(cfg.getGroupCode(), dispatchRoute, nowMillis, cfg.getDispatchBatchSize());
         Map<Long, SchedulerTask> dueTasks = dueTaskIds.isEmpty() ? Map.of() : taskRepository.findByIds(dueTaskIds);
@@ -92,24 +89,24 @@ public class DispatchService {
             boolean addedToReady = false;
             SchedulerTask task = dueTasks.get(taskId);
             if (task != null) {
+                LocalDateTime currentNow = LocalDateTime.now();
                 if (task.getStatus() == TaskStatus.PENDING) {
-                    boolean promotedNow = taskRepository.markRunnableIfPending(task.getId(), now);
+                    boolean promotedNow = taskRepository.markRunnableIfPending(task.getId(), currentNow);
                     if (promotedNow) {
                         task.setStatus(TaskStatus.RUNNABLE);
                     }
                 }
-                if (task.runnableStatus()) {
-                    queueRedisService.addToReady(task);
+                if (task.runnableStatus() && task.due(currentNow)) {
+                    queueRedisService.enqueueReady(task);
                     addedToReady = true;
-                } else if (task.getExecuteAt() != null && task.getExecuteAt().isAfter(now)
-                        && task.getStatus() == TaskStatus.PENDING) {
+                } else if (task.getExecuteAt() != null && task.getExecuteAt().isAfter(currentNow)) {
                     queueRedisService.enqueue(task);
                 }
                 if (!addedToReady) {
                     log.warn("promoted due task was not added to ready queue, taskId={}, taskNo={}, group={}, user={}, "
                                     + "status={}, executeAt={}, dueNow={}, removedFromTimeQueue=true",
                             task.getId(), task.getTaskNo(), task.getGroupCode(), task.getUserId(),
-                            task.getStatus(), task.getExecuteAt(), task.due(now));
+                            task.getStatus(), task.getExecuteAt(), task.due(currentNow));
                 }
             } else {
                 log.warn("promoted due task missing in database, taskId={}, group={}, removedFromTimeQueue=true",
@@ -126,218 +123,208 @@ public class DispatchService {
         }
 
         int pageSize = Math.max(1, cfg.getDispatchBatchSize());
-        int offset = 0;
-        Set<String> saturatedUsers = new HashSet<>();
         int dispatched = 0;
         int skipped = 0;
-        int readyScanned = 0;
-        int readyScanPages = 0;
-        int readyScanPageLimit = Math.max(1, properties.getReadyScanPageLimit());
         boolean workerPoolSaturated = false;
-        while (groupRunning < cfg.getMaxConcurrency() && readyScanPages < readyScanPageLimit) {
+        while (groupRunning < cfg.getMaxConcurrency()) {
             groupRunning = concurrencyGuard.groupRunning(cfg.getGroupCode());
             if (groupRunning >= cfg.getMaxConcurrency()) {
                 break;
             }
 
-            List<Long> ready = queueRedisService.peekReady(cfg.getGroupCode(), dispatchRoute, offset, pageSize);
-            if (ready == null || ready.isEmpty()) {
+            String userId = queueRedisService.peekNextActiveUser(cfg.getGroupCode(), dispatchRoute);
+            if (userId == null || userId.isBlank()) {
                 break;
             }
-            readyScanPages++;
-            readyScanned += ready.size();
-            Map<Long, SchedulerTask> readyTasks = taskRepository.findByIds(ready);
-            boolean progressed = false;
-            for (Long taskId : ready) {
-                if (groupRunning >= cfg.getMaxConcurrency()) {
-                    break;
-                }
+            String lockToken = queueRedisService.tryAcquireActiveUserLock(
+                    cfg.getGroupCode(), dispatchRoute, userId, properties.getActiveUserLockTtlMs()
+            );
+            if (lockToken == null) {
+                queueRedisService.rebalanceActiveUser(cfg.getGroupCode(), dispatchRoute, userId);
+                continue;
+            }
 
-                SchedulerTask task = readyTasks.get(taskId);
-                if (task == null) {
-                    queueRedisService.removeFromReady(cfg.getGroupCode(), dispatchRoute, taskId);
-                    progressed = true;
-                    skipped++;
-                    log.debug("dispatch skip missing task, group={}, taskId={}", cfg.getGroupCode(), taskId);
-                    continue;
-                }
-                if (!task.runnableStatus() || !task.due(now)) {
-                    queueRedisService.removeFromReady(cfg.getGroupCode(), dispatchRoute, taskId);
-                    progressed = true;
-                    skipped++;
-                    log.debug("dispatch skip non-runnable/non-due, group={}, taskId={}, status={}, executeAt={}",
-                            cfg.getGroupCode(), taskId, task.getStatus(), task.getExecuteAt());
-                    continue;
-                }
-
-                if (task.waitingTimedOut(now)) {
-                    boolean failed = taskStateService.markFailedByWaitDeadline(task.getId(), now);
-                    queueRedisService.removeFromReady(cfg.getGroupCode(), dispatchRoute, taskId);
-                    progressed = true;
-                    skipped++;
-                    if (failed) {
-                        log.info("dispatch skipped timed out task before running, taskId={}, taskNo={}, group={}, user={}",
-                                task.getId(), task.getTaskNo(), task.getGroupCode(), task.getUserId());
-                    }
-                    continue;
-                }
-
-                TaskHandler handler = handlerRegistry.find(task.getBizType());
-                if (handler == null) {
-                    skipped++;
-                    log.warn("dispatch skip task because no TaskHandler found in current service, taskId={}, taskNo={}, group={}, user={}, bizType={}",
-                            task.getId(), task.getTaskNo(), task.getGroupCode(), task.getUserId(), task.getBizType());
-                    continue;
-                }
-
-                BusinessTaskStateProvider stateProvider = businessTaskStateProviderRegistry.find(task.getBizType());
-                if (stateProvider != null) {
-                    BusinessTaskState state = stateProvider.query(task);
-                    if (state == BusinessTaskState.SUCCESS) {
-                        taskStateService.markTerminalByBusinessState(task.getId(), TaskStatus.SUCCESS, now);
-                        queueRedisService.removeFromReady(cfg.getGroupCode(), dispatchRoute, taskId);
-                        progressed = true;
-                        skipped++;
-                        log.info("dispatch short-circuit success by biz state, taskId={}, taskNo={}, group={}",
-                                task.getId(), task.getTaskNo(), task.getGroupCode());
-                        continue;
-                    }
-                    if (state == BusinessTaskState.FAILED) {
-                        taskStateService.markTerminalByBusinessState(task.getId(), TaskStatus.FAILED, now);
-                        queueRedisService.removeFromReady(cfg.getGroupCode(), dispatchRoute, taskId);
-                        progressed = true;
-                        skipped++;
-                        log.info("dispatch short-circuit failed by biz state, taskId={}, taskNo={}, group={}",
-                                task.getId(), task.getTaskNo(), task.getGroupCode());
-                        continue;
-                    }
-                    if (state != BusinessTaskState.NEED_RUNNING && state != BusinessTaskState.RUNNING) {
-                        LocalDateTime nextCheckAt = nextRetryTime(task);
-                        boolean deferred = taskRepository.rescheduleToRunnable(
-                                task.getId(),
-                                nextCheckAt,
-                                "BIZ_STATE_NOT_READY",
-                                "business state is " + state,
-                                now
-                        );
-                        queueRedisService.removeFromReady(cfg.getGroupCode(), dispatchRoute, taskId);
-                        progressed = true;
-                        if (deferred) {
-                            task.setExecuteAt(nextCheckAt);
-                            queueRedisService.enqueue(task);
-                        }
-                        skipped++;
-                        log.info("dispatch deferred by biz state, taskId={}, taskNo={}, state={}, nextCheckAt={}",
-                                task.getId(), task.getTaskNo(), state, nextCheckAt);
-                        continue;
-                    }
-                }
-
-                if (saturatedUsers.contains(task.getUserId())) {
-                    skipped++;
-                    log.debug("dispatch skip saturated user in current round, taskId={}, taskNo={}, group={}, user={}",
-                            task.getId(), task.getTaskNo(), cfg.getGroupCode(), task.getUserId());
+            try {
+                Integer headPriority = queueRedisService.peekReadyHeadPriority(cfg.getGroupCode(), dispatchRoute, userId);
+                if (headPriority == null) {
+                    queueRedisService.rebalanceActiveUser(cfg.getGroupCode(), dispatchRoute, userId);
                     continue;
                 }
 
                 int userLimit = dynamicUserLimitService.calculate(cfg, groupRunning);
-                String executeNo = workerService.newExecuteNo();
-                boolean acquired = concurrencyGuard.tryAcquire(
-                        cfg.getGroupCode(), task.getUserId(), task.getId(),
-                        cfg.getMaxConcurrency(), userLimit, cfg.getLockExpireSec(), executeNo
+                long userRunning = concurrencyGuard.userRunning(cfg.getGroupCode(), userId);
+                int groupRemaining = Math.max(0, cfg.getMaxConcurrency() - (int) groupRunning);
+                int userRemaining = Math.max(0, userLimit - (int) userRunning);
+                int batchLimit = Math.min(pageSize, Math.min(groupRemaining, userRemaining));
+                if (batchLimit <= 0) {
+                    queueRedisService.rebalanceActiveUser(cfg.getGroupCode(), dispatchRoute, userId);
+                    continue;
+                }
+
+                List<Long> ready = queueRedisService.peekReadyTasksByPriority(
+                        cfg.getGroupCode(), dispatchRoute, userId, headPriority, batchLimit
                 );
-                if (!acquired) {
-                    skipped++;
-                    long latestGroupRunning = concurrencyGuard.groupRunning(cfg.getGroupCode());
-                    if (latestGroupRunning >= cfg.getMaxConcurrency()) {
-                        groupRunning = latestGroupRunning;
+                if (ready.isEmpty()) {
+                    queueRedisService.rebalanceActiveUser(cfg.getGroupCode(), dispatchRoute, userId);
+                    continue;
+                }
+
+                Map<Long, SchedulerTask> readyTasks = taskRepository.findByIds(ready);
+                boolean stopCurrentUser = false;
+                for (Long taskId : ready) {
+                    if (groupRunning >= cfg.getMaxConcurrency()) {
                         break;
                     }
-                    long userRunning = concurrencyGuard.userRunning(cfg.getGroupCode(), task.getUserId());
-                    if (userRunning >= userLimit) {
-                        saturatedUsers.add(task.getUserId());
-                    }
-                    log.info("dispatch acquire false, taskId={}, taskNo={}, group={}, user={}, groupRunning={}, groupMax={}, userLimit={}",
-                            task.getId(), task.getTaskNo(), cfg.getGroupCode(), task.getUserId(), groupRunning,
-                            cfg.getMaxConcurrency(), userLimit);
-                    continue;
-                }
 
-                boolean cas = taskRepository.casToRunning(task.getId(), properties.getInstanceId(), Thread.currentThread().getName(), now);
-                if (!cas) {
-                    boolean released = concurrencyGuard.release(cfg.getGroupCode(), task.getUserId(), task.getId(), executeNo);
-                    if (!released) {
-                        String currentLease = concurrencyGuard.leaseValue(task.getId());
-                        log.warn("dispatch release mismatch, skip blind repair to avoid decrementing another execution "
-                                        + "counters, taskId={}, taskNo={}, executeNo={}, currentLease={}, group={}, user={}",
-                                task.getId(), task.getTaskNo(), executeNo, currentLease, cfg.getGroupCode(), task.getUserId());
-                        recoveryService.reconcileRunningCountersImmediately(cfg.getGroupCode(), task.getUserId(), "dispatch-cas-release-mismatch");
+                    SchedulerTask task = readyTasks.get(taskId);
+                    if (task == null) {
+                        skipped++;
+                        continue;
                     }
-                    skipped++;
-                    log.debug("dispatch CAS to RUNNING failed, taskId={}, taskNo={}, group={}",
-                            task.getId(), task.getTaskNo(), cfg.getGroupCode());
-                    continue;
-                }
+                    LocalDateTime currentNow = LocalDateTime.now();
+                    if (!task.runnableStatus() || !task.due(currentNow)) {
+                        queueRedisService.removeFromReadyQueue(task);
+                        if (task.runnableStatus() && task.getExecuteAt() != null && task.getExecuteAt().isAfter(currentNow)) {
+                            queueRedisService.enqueue(task);
+                        }
+                        skipped++;
+                        continue;
+                    }
 
-                try {
-                    workerService.submit(task, cfg, executeNo);
-                    queueRedisService.removeFromReady(cfg.getGroupCode(), dispatchRoute, task.getId());
-                    progressed = true;
-                    groupRunning++;
-                    dispatched++;
-                    log.info("task dispatched, taskId={}, taskNo={}, executeNo={}, group={}, user={}, priority={}, groupRunningAfter={}",
-                            task.getId(), task.getTaskNo(), executeNo, task.getGroupCode(), task.getUserId(), task.getPriority(), groupRunning);
-                } catch (RuntimeException ex) {
-                    boolean released = concurrencyGuard.release(cfg.getGroupCode(), task.getUserId(), task.getId(), executeNo);
-                    if (!released) {
-                        String currentLease = concurrencyGuard.leaseValue(task.getId());
-                        log.warn("dispatch submit rollback release mismatch, skip blind repair to avoid decrementing "
-                                        + "another execution counters, taskId={}, taskNo={}, executeNo={}, "
-                                        + "currentLease={}, group={}, user={}",
-                                task.getId(), task.getTaskNo(), executeNo, currentLease, cfg.getGroupCode(), task.getUserId());
-                        recoveryService.reconcileRunningCountersImmediately(cfg.getGroupCode(), task.getUserId(), "dispatch-submit-release-mismatch");
+                    if (task.waitingTimedOut(currentNow)) {
+                        boolean failed = taskStateService.markFailedByWaitDeadline(task.getId(), currentNow);
+                        queueRedisService.removeFromReadyQueue(task);
+                        skipped++;
+                        if (failed) {
+                            log.info("dispatch skipped timed out task before running, taskId={}, taskNo={}, group={}, user={}",
+                                    task.getId(), task.getTaskNo(), task.getGroupCode(), task.getUserId());
+                        }
+                        continue;
                     }
-                    LocalDateTime nextCheckAt = nextRetryTime(task);
-                    boolean rollback = taskRepository.rescheduleToRunnable(
-                            task.getId(),
-                            nextCheckAt,
-                            "DISPATCH_SUBMIT_REJECTED",
-                            ex.getClass().getSimpleName() + ":" + ex.getMessage(),
-                            now
+
+                    TaskHandler handler = handlerRegistry.find(task.getBizType());
+                    if (handler == null) {
+                        skipped++;
+                        log.warn("dispatch skip task because no TaskHandler found in current service, taskId={}, taskNo={}, group={}, user={}, bizType={}",
+                                task.getId(), task.getTaskNo(), task.getGroupCode(), task.getUserId(), task.getBizType());
+                        continue;
+                    }
+
+                    BusinessTaskStateProvider stateProvider = businessTaskStateProviderRegistry.find(task.getBizType());
+                    if (stateProvider != null) {
+                        BusinessTaskState state = stateProvider.query(task);
+                        if (state == BusinessTaskState.SUCCESS) {
+                            taskStateService.markTerminalByBusinessState(task.getId(), TaskStatus.SUCCESS, currentNow);
+                            queueRedisService.removeFromReadyQueue(task);
+                            skipped++;
+                            continue;
+                        }
+                        if (state == BusinessTaskState.FAILED) {
+                            taskStateService.markTerminalByBusinessState(task.getId(), TaskStatus.FAILED, currentNow);
+                            queueRedisService.removeFromReadyQueue(task);
+                            skipped++;
+                            continue;
+                        }
+                        if (state != BusinessTaskState.NEED_RUNNING && state != BusinessTaskState.RUNNING) {
+                            LocalDateTime nextCheckAt = nextRetryTime(task);
+                            boolean deferred = taskRepository.rescheduleToRunnable(
+                                    task.getId(),
+                                    nextCheckAt,
+                                    "BIZ_STATE_NOT_READY",
+                                    "business state is " + state,
+                                    currentNow
+                            );
+                            queueRedisService.removeFromReadyQueue(task);
+                            if (deferred) {
+                                task.setExecuteAt(nextCheckAt);
+                                queueRedisService.enqueue(task);
+                            }
+                            skipped++;
+                            continue;
+                        }
+                    }
+
+                    userLimit = dynamicUserLimitService.calculate(cfg, groupRunning);
+                    String executeNo = workerService.newExecuteNo();
+                    boolean acquired = concurrencyGuard.tryAcquire(
+                            cfg.getGroupCode(), task.getUserId(), task.getId(),
+                            cfg.getMaxConcurrency(), userLimit, cfg.getLockExpireSec(), executeNo
                     );
-                    queueRedisService.removeFromReady(cfg.getGroupCode(), dispatchRoute, task.getId());
-                    progressed = true;
-                    if (rollback) {
-                        task.setExecuteAt(nextCheckAt);
-                        queueRedisService.enqueue(task);
+                    if (!acquired) {
+                        skipped++;
+                        long latestGroupRunning = concurrencyGuard.groupRunning(cfg.getGroupCode());
+                        if (latestGroupRunning >= cfg.getMaxConcurrency()) {
+                            groupRunning = latestGroupRunning;
+                            break;
+                        }
+                        long latestUserRunning = concurrencyGuard.userRunning(cfg.getGroupCode(), task.getUserId());
+                        if (latestUserRunning >= userLimit) {
+                            stopCurrentUser = true;
+                            break;
+                        }
+                        continue;
                     }
-                    skipped++;
-                    log.warn("dispatch submit rejected and rolled back by worker pool capacity, taskId={}, taskNo={}, "
-                                    + "executeNo={}, rollback={}, nextCheckAt={}",
-                            task.getId(), task.getTaskNo(), executeNo, rollback, nextCheckAt, ex);
-                    if (isWorkerPoolRejected(ex)) {
-                        workerPoolSaturated = true;
-                        log.info("dispatch stop current round because worker pool is saturated, group={}, taskId={}, taskNo={}",
-                                cfg.getGroupCode(), task.getId(), task.getTaskNo());
-                        break;
+
+                    boolean cas = taskRepository.casToRunning(task.getId(), properties.getInstanceId(), Thread.currentThread().getName(), currentNow);
+                    if (!cas) {
+                        boolean released = concurrencyGuard.release(cfg.getGroupCode(), task.getUserId(), task.getId(), executeNo);
+                        if (!released) {
+                            String currentLease = concurrencyGuard.leaseValue(task.getId());
+                            log.warn("dispatch release mismatch, skip blind repair to avoid decrementing another execution "
+                                            + "counters, taskId={}, taskNo={}, executeNo={}, currentLease={}, group={}, user={}",
+                                    task.getId(), task.getTaskNo(), executeNo, currentLease, cfg.getGroupCode(), task.getUserId());
+                            recoveryService.reconcileRunningCountersImmediately(cfg.getGroupCode(), task.getUserId(), "dispatch-cas-release-mismatch");
+                        }
+                        skipped++;
+                        continue;
+                    }
+
+                    try {
+                        workerService.submit(task, cfg, executeNo);
+                        queueRedisService.removeFromReadyQueue(task);
+                        groupRunning++;
+                        dispatched++;
+                    } catch (RuntimeException ex) {
+                        boolean released = concurrencyGuard.release(cfg.getGroupCode(), task.getUserId(), task.getId(), executeNo);
+                        if (!released) {
+                            String currentLease = concurrencyGuard.leaseValue(task.getId());
+                            log.warn("dispatch submit rollback release mismatch, skip blind repair to avoid decrementing "
+                                            + "another execution counters, taskId={}, taskNo={}, executeNo={}, "
+                                            + "currentLease={}, group={}, user={}",
+                                    task.getId(), task.getTaskNo(), executeNo, currentLease, cfg.getGroupCode(), task.getUserId());
+                            recoveryService.reconcileRunningCountersImmediately(cfg.getGroupCode(), task.getUserId(), "dispatch-submit-release-mismatch");
+                        }
+                        LocalDateTime nextCheckAt = nextRetryTime(task);
+                        boolean rollback = taskRepository.rescheduleToRunnable(
+                                task.getId(),
+                                nextCheckAt,
+                                "DISPATCH_SUBMIT_REJECTED",
+                                ex.getClass().getSimpleName() + ":" + ex.getMessage(),
+                                currentNow
+                        );
+                        queueRedisService.removeFromReadyQueue(task);
+                        if (rollback) {
+                            task.setExecuteAt(nextCheckAt);
+                            queueRedisService.enqueue(task);
+                        }
+                        skipped++;
+                        if (isWorkerPoolRejected(ex)) {
+                            workerPoolSaturated = true;
+                            break;
+                        }
                     }
                 }
-            }
-            if (workerPoolSaturated) {
-                break;
-            }
-            if (!progressed) {
-                offset += ready.size();
-            } else {
-                offset = Math.max(0, offset - ready.size());
-            }
-        }
 
-        if (readyScanPages >= readyScanPageLimit && groupRunning < cfg.getMaxConcurrency()) {
-            log.warn("dispatch ready scan page limit reached, group={}, readyScanPages={}, pageSize={}, readyScanned={}, "
-                            + "dispatched={}, skipped={}, saturatedUsers={}, groupRunning={}, groupMax={}",
-                    cfg.getGroupCode(), readyScanPages, pageSize, readyScanned, dispatched, skipped,
-                    saturatedUsers.size(), groupRunning, cfg.getMaxConcurrency());
+                queueRedisService.rebalanceActiveUser(cfg.getGroupCode(), dispatchRoute, userId);
+                if (workerPoolSaturated) {
+                    break;
+                }
+                if (stopCurrentUser) {
+                    continue;
+                }
+            } finally {
+                queueRedisService.releaseActiveUserLock(cfg.getGroupCode(), dispatchRoute, userId, lockToken);
+            }
         }
 
         if (dispatched > 0 || groupRunning > 0) {
@@ -346,10 +333,10 @@ public class DispatchService {
             if (current % SUMMARY_LOG_EVERY_N != 0) {
                 return;
             }
-            log.info("dispatch group summary, group={}, promoted={}, readyScanPages={}, readyScanned={}, pageSize={}, "
-                            + "dispatched={}, skipped={}, saturatedUsers={}, groupRunning={}, costMs={}",
-                    cfg.getGroupCode(), promoted, readyScanPages, readyScanned, pageSize, dispatched, skipped,
-                    saturatedUsers.size(), groupRunning, System.currentTimeMillis() - begin);
+            log.info("dispatch group summary, group={}, promoted={}, userBatchSize={}, dispatched={}, skipped={}, "
+                            + "groupRunning={}, costMs={}",
+                    cfg.getGroupCode(), promoted, pageSize, dispatched, skipped,
+                    groupRunning, System.currentTimeMillis() - begin);
         }
     }
 

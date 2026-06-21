@@ -77,7 +77,7 @@ CREATE TABLE IF NOT EXISTS scheduler_group_config (
     dynamic_user_limit_enabled TINYINT NOT NULL DEFAULT 0 COMMENT '是否启用动态user并发策略',
     load_strategy_json JSON DEFAULT NULL COMMENT '动态策略配置JSON',
 
-    dispatch_batch_size INT NOT NULL DEFAULT 100 COMMENT '每轮调度批大小',
+    dispatch_batch_size INT NOT NULL DEFAULT 20 COMMENT '每轮调度批大小',
     heartbeat_timeout_sec INT NOT NULL DEFAULT 90 COMMENT '心跳超时阈值（秒）',
     lock_expire_sec INT NOT NULL DEFAULT 120 COMMENT '任务租约过期时间（秒）',
 

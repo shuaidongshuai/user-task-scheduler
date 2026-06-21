@@ -68,8 +68,9 @@ public class SchedulerAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
-    public QueueRedisService queueRedisService(org.springframework.data.redis.core.StringRedisTemplate redisTemplate) {
-        return new QueueRedisService(redisTemplate);
+    public QueueRedisService queueRedisService(org.springframework.data.redis.core.StringRedisTemplate redisTemplate,
+                                               SchedulerProperties properties) {
+        return new QueueRedisService(redisTemplate, properties);
     }
 
     @Bean

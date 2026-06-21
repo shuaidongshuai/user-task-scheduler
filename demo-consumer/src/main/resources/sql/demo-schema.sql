@@ -29,7 +29,7 @@ INSERT INTO scheduler_group_config(
             JSON_OBJECT('loadLt', 1.01, 'factor', 0.5)
         )
     ),
-    100, 30, 60,
+    20, 30, 60,
     'demo group'
 )
 ON DUPLICATE KEY UPDATE

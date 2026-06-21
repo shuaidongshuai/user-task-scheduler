@@ -26,6 +26,27 @@ public final class RedisKeys {
         return "sched:queue:ready:" + group + ":" + route;
     }
 
+    public static String activeUsers(String group, String route) {
+        if (route == null || route.isBlank()) {
+            return "sched:active-users:" + group;
+        }
+        return "sched:active-users:" + group + ":" + route;
+    }
+
+    public static String userReadyQueue(String group, String route, String userId) {
+        if (route == null || route.isBlank()) {
+            return "sched:ready:user:" + group + ":" + userId;
+        }
+        return "sched:ready:user:" + group + ":" + route + ":" + userId;
+    }
+
+    public static String activeUserLock(String group, String route, String userId) {
+        if (route == null || route.isBlank()) {
+            return "sched:active-user-lock:" + group + ":" + userId;
+        }
+        return "sched:active-user-lock:" + group + ":" + route + ":" + userId;
+    }
+
     public static String groupRunning(String group) {
         return "sched:group:running:" + group;
     }

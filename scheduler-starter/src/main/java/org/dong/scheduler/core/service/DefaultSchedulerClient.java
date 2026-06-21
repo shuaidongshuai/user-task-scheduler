@@ -32,7 +32,7 @@ import java.util.UUID;
 @Slf4j
 public class DefaultSchedulerClient implements SchedulerClient {
     private static final int MIN_PRIORITY = 0;
-    private static final int MAX_PRIORITY = 99_999;
+    private static final int MAX_PRIORITY = 99;
     private static final String MAX_WAIT_ERROR = "maxWaitSec must be greater than 0";
 
     private final TaskRepository taskRepository;

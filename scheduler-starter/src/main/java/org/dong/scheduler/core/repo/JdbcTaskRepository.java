@@ -243,6 +243,28 @@ public class JdbcTaskRepository implements TaskRepository {
     }
 
     @Override
+    public List<SchedulerTask> findPendingForTimeQueueRefill(String dispatchRoute, LocalDateTime now, int limit) {
+        if (dispatchRoute == null || dispatchRoute.isBlank()) {
+            return jdbcTemplate.query("""
+                    select * from scheduler_task
+                     where dispatch_route is null
+                       and status = 'PENDING'
+                       and execute_at > ?
+                     order by execute_at asc
+                     limit ?
+                    """, this::mapTask, Timestamp.valueOf(now), limit);
+        }
+        return jdbcTemplate.query("""
+                select * from scheduler_task
+                 where dispatch_route = ?
+                   and status = 'PENDING'
+                   and execute_at > ?
+                 order by execute_at asc
+                 limit ?
+                """, this::mapTask, dispatchRoute, Timestamp.valueOf(now), limit);
+    }
+
+    @Override
     public List<Long> findWaitingTimeoutTaskIds(LocalDateTime now, int limit) {
         return jdbcTemplate.query("""
                 select id from scheduler_task

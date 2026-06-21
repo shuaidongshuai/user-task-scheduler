@@ -264,6 +264,7 @@ class DefaultSchedulerClientTest {
                         .setUserId("u1")
                         .setBizType("demo.biz")
                         .setBizKey("biz-b")
+                        .setPriority(999)
                         .setMaxRetryCount(-1)
                         .setRetryDelaySec(-2)
                         .setExecuteAt(LocalDateTime.now())
@@ -286,6 +287,7 @@ class DefaultSchedulerClientTest {
         assertEquals(0, commands.getFirst().request().getPriority());
         assertEquals("g1", commands.get(1).request().getGroupCode());
         assertEquals("route-a", commands.get(1).request().getDispatchRoute());
+        assertEquals(99, commands.get(1).request().getPriority());
         assertEquals(0, commands.get(1).request().getMaxRetryCount());
         assertEquals(0, commands.get(1).request().getRetryDelaySec());
     }

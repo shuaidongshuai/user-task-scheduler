@@ -116,7 +116,7 @@ class TaskStateServiceTest {
         long taskId = taskStateService.submit("task-ready", request);
 
         assertEquals(110L, taskId);
-        verify(queueRedisService).addToReady(persistedTask);
+        verify(queueRedisService).enqueueReady(persistedTask);
         verify(queueRedisService, never()).enqueue(persistedTask);
     }
 
@@ -141,7 +141,7 @@ class TaskStateServiceTest {
         boolean changed = taskStateService.markSuccess(200L, now);
 
         assertTrue(changed);
-        verify(queueRedisService).addToReady(downstream1);
+        verify(queueRedisService).enqueueReady(downstream1);
         verify(queueRedisService).enqueue(downstream2);
     }
 
@@ -196,7 +196,7 @@ class TaskStateServiceTest {
         verify(taskDependencyService).createDependencies(eq(102L),
                 eq(List.of(new TaskDependencyRequest(101L, DependencyTargetState.SUCCESS))),
                 any(LocalDateTime.class));
-        verify(queueRedisService).addToReady(persistedA);
+        verify(queueRedisService).enqueueReady(persistedA);
         verify(queueRedisService).enqueue(persistedB);
     }
 
@@ -222,7 +222,7 @@ class TaskStateServiceTest {
         when(taskRepository.findById(201L)).thenReturn(Optional.of(persisted));
 
         assertThrows(IllegalArgumentException.class, () -> taskStateService.submitBatch(List.of(cmd)));
-        verify(queueRedisService, never()).addToReady(any());
+        verify(queueRedisService, never()).enqueueReady(any());
         verify(queueRedisService, never()).enqueue(any());
     }
 
@@ -247,6 +247,6 @@ class TaskStateServiceTest {
         int expired = taskStateService.expireWaitingTasks(100, now);
 
         assertEquals(1, expired);
-        verify(queueRedisService).addToReady(downstream);
+        verify(queueRedisService).enqueueReady(downstream);
     }
 }
