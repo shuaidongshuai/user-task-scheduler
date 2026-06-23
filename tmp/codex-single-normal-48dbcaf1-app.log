@@ -1,0 +1,39 @@
+
+  .   ____          _            __ _ _
+ /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
+( ( )\___ | '_ | '_| | '_ \/ _` | \ \ \ \
+ \\/  ___)| |_)| | | | | || (_| |  ) ) ) )
+  '  |____| .__|_| |_|_| |_\__, | / / / /
+ =========|_|==============|___/=/_/_/_/
+
+ :: Spring Boot ::                (v3.3.5)
+
+2026-06-24T00:16:24.849+08:00  INFO [trace_id:] 97888 --- [           main] org.dong.demo.DemoConsumerApplication    : Starting DemoConsumerApplication v1.0-SNAPSHOT using Java 21.0.1 with PID 97888 (/Users/chenmingdong01/Documents/github/user-task-scheduler/demo-consumer/target/demo-consumer-1.0-SNAPSHOT.jar started by chenmingdong01 in /Users/chenmingdong01/Documents/github/user-task-scheduler)
+2026-06-24T00:16:24.851+08:00 DEBUG [trace_id:] 97888 --- [           main] org.dong.demo.DemoConsumerApplication    : Running with Spring Boot v3.3.5, Spring v6.1.14
+2026-06-24T00:16:24.853+08:00  INFO [trace_id:] 97888 --- [           main] org.dong.demo.DemoConsumerApplication    : No active profile set, falling back to 1 default profile: "default"
+2026-06-24T00:16:25.648+08:00  INFO [trace_id:] 97888 --- [           main] .s.d.r.c.RepositoryConfigurationDelegate : Multiple Spring Data modules found, entering strict repository configuration mode
+2026-06-24T00:16:25.651+08:00  INFO [trace_id:] 97888 --- [           main] .s.d.r.c.RepositoryConfigurationDelegate : Bootstrapping Spring Data Redis repositories in DEFAULT mode.
+2026-06-24T00:16:25.693+08:00  INFO [trace_id:] 97888 --- [           main] .s.d.r.c.RepositoryConfigurationDelegate : Finished Spring Data repository scanning in 20 ms. Found 0 Redis repository interfaces.
+2026-06-24T00:16:26.341+08:00  INFO [trace_id:] 97888 --- [           main] o.s.b.w.embedded.tomcat.TomcatWebServer  : Tomcat initialized with port 18119 (http)
+2026-06-24T00:16:26.357+08:00  INFO [trace_id:] 97888 --- [           main] o.apache.catalina.core.StandardService   : Starting service [Tomcat]
+2026-06-24T00:16:26.357+08:00  INFO [trace_id:] 97888 --- [           main] o.apache.catalina.core.StandardEngine    : Starting Servlet engine: [Apache Tomcat/10.1.31]
+2026-06-24T00:16:26.396+08:00  INFO [trace_id:] 97888 --- [           main] o.a.c.c.C.[Tomcat].[localhost].[/]       : Initializing Spring embedded WebApplicationContext
+2026-06-24T00:16:26.397+08:00  INFO [trace_id:] 97888 --- [           main] w.s.c.ServletWebServerApplicationContext : Root WebApplicationContext: initialization completed in 1492 ms
+2026-06-24T00:16:27.885+08:00  WARN [trace_id:] 97888 --- [           main] ConfigServletWebServerApplicationContext : Exception encountered during context initialization - cancelling refresh attempt: org.springframework.context.ApplicationContextException: Failed to start bean 'webServerStartStop'
+2026-06-24T00:16:27.910+08:00  INFO [trace_id:] 97888 --- [           main] .s.b.a.l.ConditionEvaluationReportLogger : 
+
+Error starting ApplicationContext. To display the condition evaluation report re-run your application with 'debug' enabled.
+2026-06-24T00:16:27.927+08:00 ERROR [trace_id:] 97888 --- [           main] o.s.b.d.LoggingFailureAnalysisReporter   : 
+
+***************************
+APPLICATION FAILED TO START
+***************************
+
+Description:
+
+Web server failed to start. Port 18119 was already in use.
+
+Action:
+
+Identify and stop the process that's listening on port 18119 or configure this application to listen on another port.
+

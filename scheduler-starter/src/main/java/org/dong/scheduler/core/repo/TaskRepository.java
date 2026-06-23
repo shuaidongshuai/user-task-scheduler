@@ -22,6 +22,8 @@ public interface TaskRepository {
 
     boolean casToRunning(Long id, String instanceId, String threadName, LocalDateTime now);
 
+    boolean casWaitHoldToRunning(Long id, String instanceId, String threadName, LocalDateTime now);
+
     boolean markSuccess(Long id, LocalDateTime now);
 
     boolean markFailed(Long id, String errorCode, String errorMsg, LocalDateTime now);
@@ -31,6 +33,10 @@ public interface TaskRepository {
     boolean markFailedPendingByDependency(Long id, String errorCode, String errorMsg, LocalDateTime now);
 
     boolean markWaitRetry(Long id, LocalDateTime nextRetryAt, String errorCode, String errorMsg, LocalDateTime now);
+
+    boolean markWaitHold(Long id, LocalDateTime nextExecuteAt, String extInfo, LocalDateTime now);
+
+    boolean rollbackToWaitHold(Long id, LocalDateTime nextExecuteAt, LocalDateTime now);
 
     boolean rescheduleToRunnable(Long id, LocalDateTime nextExecuteAt, String errorCode, String errorMsg, LocalDateTime now);
 

@@ -4,6 +4,7 @@ public enum TaskStatus {
     PENDING,
     RUNNABLE,
     RUNNING,
+    WAIT_HOLD,
     WAIT_RETRY,
     SUCCESS,
     FAILED,

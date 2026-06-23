@@ -33,9 +33,10 @@ public class JdbcTaskRepository implements TaskRepository {
                     insert into scheduler_task(
                         task_no, group_code, dispatch_route, user_id, biz_type, biz_key,
                         status, priority, execute_at, next_retry_at,
-                        retry_count, max_retry_count, execute_timeout_sec, retry_delay_sec, max_wait_sec, wait_deadline_at,
+                        retry_count, max_retry_count, hold_round_count, hold_max_rounds, hold_retry_delay_sec,
+                        execute_timeout_sec, retry_delay_sec, max_wait_sec, wait_deadline_at,
                         version, ext_info, create_time, update_time
-                    ) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,now(),now())
+                    ) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,now(),now())
                     """, Statement.RETURN_GENERATED_KEYS);
             ps.setString(1, taskNo);
             ps.setString(2, request.getGroupCode());
@@ -53,28 +54,31 @@ public class JdbcTaskRepository implements TaskRepository {
             ps.setTimestamp(10, null);
             ps.setInt(11, 0);
             ps.setInt(12, request.getMaxRetryCount());
+            ps.setInt(13, 0);
+            ps.setInt(14, request.getHoldMaxRounds());
+            ps.setInt(15, request.getHoldRetryDelaySec());
             if (request.getExecuteTimeoutSec() == null) {
-                ps.setObject(13, null);
+                ps.setObject(16, null);
             } else {
-                ps.setInt(13, request.getExecuteTimeoutSec());
+                ps.setInt(16, request.getExecuteTimeoutSec());
             }
             if (request.getRetryDelaySec() == null) {
-                ps.setObject(14, null);
+                ps.setObject(17, null);
             } else {
-                ps.setInt(14, request.getRetryDelaySec());
+                ps.setInt(17, request.getRetryDelaySec());
             }
             if (request.getMaxWaitSec() == null) {
-                ps.setObject(15, null);
+                ps.setObject(18, null);
             } else {
-                ps.setInt(15, request.getMaxWaitSec());
+                ps.setInt(18, request.getMaxWaitSec());
             }
             if (request.getWaitDeadlineAt() == null) {
-                ps.setTimestamp(16, null);
+                ps.setTimestamp(19, null);
             } else {
-                ps.setTimestamp(16, Timestamp.valueOf(request.getWaitDeadlineAt()));
+                ps.setTimestamp(19, Timestamp.valueOf(request.getWaitDeadlineAt()));
             }
-            ps.setInt(17, 0);
-            ps.setString(18, extInfo);
+            ps.setInt(20, 0);
+            ps.setString(21, extInfo);
             return ps;
         }, keyHolder);
         return Objects.requireNonNull(keyHolder.getKey()).longValue();
@@ -131,6 +135,17 @@ public class JdbcTaskRepository implements TaskRepository {
     }
 
     @Override
+    public boolean casWaitHoldToRunning(Long id, String instanceId, String threadName, LocalDateTime now) {
+        int updated = jdbcTemplate.update("""
+                update scheduler_task
+                   set status='RUNNING', dispatcher_instance=?, worker_instance=?, worker_thread=?,
+                       start_time=?, heartbeat_time=?, update_time=now(), version=version+1
+                 where id=? and status='WAIT_HOLD'
+                """, instanceId, instanceId, threadName, Timestamp.valueOf(now), Timestamp.valueOf(now), id);
+        return updated > 0;
+    }
+
+    @Override
     public boolean markSuccess(Long id, LocalDateTime now) {
         return jdbcTemplate.update("""
                 update scheduler_task
@@ -144,7 +159,7 @@ public class JdbcTaskRepository implements TaskRepository {
         return jdbcTemplate.update("""
                 update scheduler_task
                    set status='FAILED', finish_time=?, error_code=?, error_msg=?, update_time=now(), version=version+1
-                 where id=? and status in ('RUNNING','WAIT_RETRY','RUNNABLE')
+                 where id=? and status in ('RUNNING','WAIT_HOLD','WAIT_RETRY','RUNNABLE')
                 """, Timestamp.valueOf(now), errorCode, errorMsg, id) > 0;
     }
 
@@ -178,6 +193,28 @@ public class JdbcTaskRepository implements TaskRepository {
     }
 
     @Override
+    public boolean markWaitHold(Long id, LocalDateTime nextExecuteAt, String extInfo, LocalDateTime now) {
+        return jdbcTemplate.update("""
+                update scheduler_task
+                   set status='WAIT_HOLD', hold_round_count=hold_round_count+1, execute_at=?, next_retry_at=null,
+                       error_code=null, error_msg=null, ext_info=?, worker_instance=null, worker_thread=null,
+                       heartbeat_time=null, update_time=now(), version=version+1
+                 where id=? and status='RUNNING'
+                """, Timestamp.valueOf(nextExecuteAt), extInfo, id) > 0;
+    }
+
+    @Override
+    public boolean rollbackToWaitHold(Long id, LocalDateTime nextExecuteAt, LocalDateTime now) {
+        return jdbcTemplate.update("""
+                update scheduler_task
+                   set status='WAIT_HOLD', execute_at=?, next_retry_at=null,
+                       worker_instance=null, worker_thread=null, heartbeat_time=null,
+                       update_time=now(), version=version+1
+                 where id=? and status='RUNNING'
+                """, Timestamp.valueOf(nextExecuteAt), id) > 0;
+    }
+
+    @Override
     public boolean rescheduleToRunnable(Long id, LocalDateTime nextExecuteAt, String errorCode, String errorMsg, LocalDateTime now) {
         return jdbcTemplate.update("""
                 update scheduler_task
@@ -193,7 +230,7 @@ public class JdbcTaskRepository implements TaskRepository {
         return jdbcTemplate.update("""
                 update scheduler_task
                    set status='CANCELLED', finish_time=?, update_time=now(), version=version+1
-                 where task_no=? and status in ('PENDING','RUNNABLE','WAIT_RETRY')
+                 where task_no=? and status in ('PENDING','RUNNABLE','WAIT_RETRY','WAIT_HOLD')
                 """, Timestamp.valueOf(now), taskNo) > 0;
     }
 
@@ -230,14 +267,14 @@ public class JdbcTaskRepository implements TaskRepository {
             return jdbcTemplate.query("""
                     select * from scheduler_task
                      where dispatch_route is null
-                       and status in ('RUNNABLE','WAIT_RETRY')
+                       and status in ('RUNNABLE','WAIT_RETRY','WAIT_HOLD')
                      order by execute_at asc limit ?
                     """, this::mapTask, limit);
         }
         return jdbcTemplate.query("""
                 select * from scheduler_task
                  where dispatch_route = ?
-                   and status in ('RUNNABLE','WAIT_RETRY')
+                   and status in ('RUNNABLE','WAIT_RETRY','WAIT_HOLD')
                  order by execute_at asc limit ?
                 """, this::mapTask, dispatchRoute, limit);
     }
@@ -268,7 +305,7 @@ public class JdbcTaskRepository implements TaskRepository {
     public List<Long> findWaitingTimeoutTaskIds(LocalDateTime now, int limit) {
         return jdbcTemplate.query("""
                 select id from scheduler_task
-                 where status in ('PENDING','RUNNABLE','WAIT_RETRY')
+                 where status in ('PENDING','RUNNABLE','WAIT_RETRY','WAIT_HOLD')
                    and wait_deadline_at is not null
                    and wait_deadline_at <= ?
                  order by wait_deadline_at asc
@@ -340,7 +377,7 @@ public class JdbcTaskRepository implements TaskRepository {
         return jdbcTemplate.update("""
                 update scheduler_task
                    set status=?, finish_time=?, update_time=now(), version=version+1
-                 where id=? and status in ('RUNNABLE','WAIT_RETRY','RUNNING','PENDING')
+                 where id=? and status in ('RUNNABLE','WAIT_RETRY','WAIT_HOLD','RUNNING','PENDING')
                 """, status.name(), Timestamp.valueOf(now), id) > 0;
     }
 
@@ -368,7 +405,7 @@ public class JdbcTaskRepository implements TaskRepository {
     @Override
     public long countRunningByGroup(String groupCode) {
         Long count = jdbcTemplate.queryForObject("""
-                select count(1) from scheduler_task where group_code=? and status='RUNNING'
+                select count(1) from scheduler_task where group_code=? and status in ('RUNNING','WAIT_HOLD')
                 """, Long.class, groupCode);
         return count == null ? 0L : count;
     }
@@ -376,7 +413,7 @@ public class JdbcTaskRepository implements TaskRepository {
     @Override
     public long countRunningByUserInGroup(String groupCode, String userId) {
         Long count = jdbcTemplate.queryForObject("""
-                select count(1) from scheduler_task where group_code=? and user_id=? and status='RUNNING'
+                select count(1) from scheduler_task where group_code=? and user_id=? and status in ('RUNNING','WAIT_HOLD')
                 """, Long.class, groupCode, userId);
         return count == null ? 0L : count;
     }
@@ -386,7 +423,7 @@ public class JdbcTaskRepository implements TaskRepository {
         List<Map<String, Object>> rows = jdbcTemplate.queryForList("""
                 select user_id, count(1) as cnt
                   from scheduler_task
-                 where group_code=? and status='RUNNING'
+                 where group_code=? and status in ('RUNNING','WAIT_HOLD')
                  group by user_id
                 """, groupCode);
         Map<String, Long> result = new HashMap<>();
@@ -413,6 +450,9 @@ public class JdbcTaskRepository implements TaskRepository {
         task.setNextRetryAt(tsToLdt(rs.getTimestamp("next_retry_at")));
         task.setRetryCount(rs.getInt("retry_count"));
         task.setMaxRetryCount(rs.getInt("max_retry_count"));
+        task.setHoldRoundCount(rs.getInt("hold_round_count"));
+        task.setHoldMaxRounds(rs.getInt("hold_max_rounds"));
+        task.setHoldRetryDelaySec(rs.getInt("hold_retry_delay_sec"));
         task.setExecuteTimeoutSec((Integer) rs.getObject("execute_timeout_sec"));
         task.setRetryDelaySec((Integer) rs.getObject("retry_delay_sec"));
         task.setMaxWaitSec((Integer) rs.getObject("max_wait_sec"));

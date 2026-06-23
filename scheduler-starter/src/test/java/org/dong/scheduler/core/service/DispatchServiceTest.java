@@ -25,6 +25,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
@@ -143,8 +144,8 @@ class DispatchServiceTest {
         when(queueRedisService.tryAcquireActiveUserLock("g1", ROUTE, "u2", 5000L)).thenReturn("lock-u2");
         when(queueRedisService.peekReadyHeadPriority("g1", ROUTE, "u1")).thenReturn(0, 0);
         when(queueRedisService.peekReadyHeadPriority("g1", ROUTE, "u2")).thenReturn(9, null);
-        when(queueRedisService.peekReadyTasksByPriority("g1", ROUTE, "u1", 0, 1)).thenReturn(List.of(301L));
-        when(queueRedisService.peekReadyTasksByPriority("g1", ROUTE, "u2", 9, 1)).thenReturn(List.of(401L));
+        when(queueRedisService.peekReadyTasksByPriority("g1", ROUTE, "u1", 0, 2)).thenReturn(List.of(301L));
+        when(queueRedisService.peekReadyTasksByPriority("g1", ROUTE, "u2", 9, 2)).thenReturn(List.of(401L));
         when(taskRepository.findByIds(List.of(301L))).thenReturn(Map.of(301L, u1p0));
         when(taskRepository.findByIds(List.of(401L))).thenReturn(Map.of(401L, u2p9));
         when(dynamicUserLimitService.calculate(eq(group), anyLong())).thenReturn(1);
@@ -214,6 +215,37 @@ class DispatchServiceTest {
         verify(queueRedisService).enqueue(futureTask);
         verify(workerService, never()).submit(eq(futureTask), any(), any());
         assertTrue(futureTask.getExecuteAt().isAfter(LocalDateTime.now().minusSeconds(1)));
+    }
+
+    @Test
+    void shouldResumeWaitHoldTaskWithoutReacquiringConcurrency() {
+        GroupConfig group = group("g1", 1, 2, 60);
+        SchedulerTask holdTask = runnableTask(801L, "u1", 0);
+        holdTask.setStatus(TaskStatus.WAIT_HOLD);
+        holdTask.setHoldRoundCount(1);
+        holdTask.setHoldMaxRounds(5);
+        holdTask.setHoldRetryDelaySec(3);
+
+        when(groupConfigRepository.listEnabled()).thenReturn(List.of(group));
+        when(queueRedisService.promoteDueTasks(eq("g1"), eq(ROUTE), anyLong(), eq(2))).thenReturn(List.of());
+        when(concurrencyGuard.groupRunning("g1")).thenReturn(1L, 1L);
+        when(queueRedisService.peekNextActiveUser("g1", ROUTE)).thenReturn("u1", null);
+        when(queueRedisService.tryAcquireActiveUserLock("g1", ROUTE, "u1", 5000L)).thenReturn("lock-u1");
+        when(queueRedisService.peekReadyHeadPriority("g1", ROUTE, "u1")).thenReturn(0, null);
+        when(queueRedisService.peekReadyTasksByPriority("g1", ROUTE, "u1", 0, 2)).thenReturn(List.of(801L));
+        when(taskRepository.findByIds(List.of(801L))).thenReturn(Map.of(801L, holdTask));
+        when(dynamicUserLimitService.calculate(eq(group), anyLong())).thenReturn(2);
+        when(workerService.newExecuteNo()).thenReturn("exec-801");
+        when(concurrencyGuard.acquireLease(801L, "exec-801", 60)).thenReturn(true);
+        when(taskRepository.casWaitHoldToRunning(eq(801L), eq(null), eq(Thread.currentThread().getName()), any(LocalDateTime.class)))
+                .thenReturn(true);
+
+        dispatchService.dispatchOnce();
+
+        verify(concurrencyGuard, never()).tryAcquire(anyString(), anyString(), anyLong(), anyInt(), anyInt(), anyInt(), anyString());
+        verify(concurrencyGuard).acquireLease(801L, "exec-801", 60);
+        verify(taskRepository).casWaitHoldToRunning(eq(801L), eq(null), eq(Thread.currentThread().getName()), any(LocalDateTime.class));
+        verify(workerService).submit(holdTask, group, "exec-801");
     }
 
     private GroupConfig group(String groupCode, int maxConcurrency, int dispatchBatchSize, int lockExpireSec) {

@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS scheduler_task (
     biz_type VARCHAR(64) NOT NULL COMMENT '业务类型（匹配TaskHandler）',
     biz_key VARCHAR(128) NOT NULL COMMENT '业务键（可重复，用于业务侧关联）',
 
-    status VARCHAR(32) NOT NULL COMMENT '任务状态：PENDING/RUNNABLE/RUNNING/WAIT_RETRY/SUCCESS/FAILED/CANCELLED',
+    status VARCHAR(32) NOT NULL COMMENT '任务状态：PENDING/RUNNABLE/RUNNING/WAIT_HOLD/WAIT_RETRY/SUCCESS/FAILED/CANCELLED',
     priority INT NOT NULL DEFAULT 0 COMMENT '优先级，值越大优先级越高',
 
     execute_at DATETIME NOT NULL COMMENT '计划执行时间',
@@ -20,6 +20,9 @@ CREATE TABLE IF NOT EXISTS scheduler_task (
 
     retry_count INT NOT NULL DEFAULT 0 COMMENT '当前重试次数',
     max_retry_count INT NOT NULL DEFAULT 0 COMMENT '最大重试次数',
+    hold_round_count INT NOT NULL DEFAULT 0 COMMENT 'WAIT_HOLD 已经进入的轮次数',
+    hold_max_rounds INT NOT NULL DEFAULT 1000 COMMENT 'WAIT_HOLD 最多允许轮次数',
+    hold_retry_delay_sec INT NOT NULL DEFAULT 3 COMMENT 'WAIT_HOLD 每轮等待时间（秒）',
     execute_timeout_sec INT DEFAULT NULL COMMENT '任务执行超时时间（秒）',
     retry_delay_sec INT DEFAULT NULL COMMENT '单任务重试间隔（秒，为空则使用全局配置）',
     max_wait_sec INT DEFAULT NULL COMMENT '任务最长等待调度时间（秒，为空表示不限时）',
@@ -95,7 +98,7 @@ CREATE TABLE IF NOT EXISTS scheduler_task_execution (
     user_id VARCHAR(64) NOT NULL COMMENT '用户ID',
 
     execute_no VARCHAR(64) NOT NULL COMMENT '执行实例号（一次执行一次号）',
-    status VARCHAR(32) NOT NULL COMMENT '执行状态：RUNNING/SUCCESS/FAILED/WAIT_RETRY',
+    status VARCHAR(32) NOT NULL COMMENT '执行状态：RUNNING/WAIT_HOLD/SUCCESS/FAILED/WAIT_RETRY',
 
     dispatcher_instance VARCHAR(128) DEFAULT NULL COMMENT '调度实例标识',
     worker_instance VARCHAR(128) DEFAULT NULL COMMENT '执行实例标识',

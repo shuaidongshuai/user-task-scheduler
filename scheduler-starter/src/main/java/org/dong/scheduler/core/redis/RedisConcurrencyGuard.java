@@ -59,6 +59,20 @@ public class RedisConcurrencyGuard implements ConcurrencyGuard {
             redis.call('EXPIRE', KEYS[1], ARGV[2])
             return 1
             """;
+    private static final String ACQUIRE_LEASE_ONLY_SCRIPT = """
+            if redis.call('SET', KEYS[1], ARGV[1], 'NX', 'EX', ARGV[2]) == false then
+                return 0
+            end
+            return 1
+            """;
+    private static final String RELEASE_LEASE_ONLY_SCRIPT = """
+            local lease = redis.call('GET', KEYS[1])
+            if lease ~= ARGV[1] then
+                return 0
+            end
+            redis.call('DEL', KEYS[1])
+            return 1
+            """;
     private static final String REPAIR_RELEASE_SCRIPT = """
             local groupRunning = tonumber(redis.call('GET', KEYS[1]) or '0')
             if groupRunning > 0 then
@@ -141,6 +155,27 @@ public class RedisConcurrencyGuard implements ConcurrencyGuard {
                 RELEASE_SCRIPT.getBytes(StandardCharsets.UTF_8), ReturnType.INTEGER, 3,
                 RedisKeys.groupRunning(groupCode).getBytes(StandardCharsets.UTF_8),
                 RedisKeys.userRunning(groupCode, userId).getBytes(StandardCharsets.UTF_8),
+                RedisKeys.taskLease(taskId).getBytes(StandardCharsets.UTF_8),
+                executeNo.getBytes(StandardCharsets.UTF_8)
+        ), true);
+        return result != null && result == 1L;
+    }
+
+    @Override
+    public boolean acquireLease(long taskId, String executeNo, int leaseSec) {
+        Long result = redisTemplate.execute(connection -> (Long) connection.scriptingCommands().eval(
+                ACQUIRE_LEASE_ONLY_SCRIPT.getBytes(StandardCharsets.UTF_8), ReturnType.INTEGER, 1,
+                RedisKeys.taskLease(taskId).getBytes(StandardCharsets.UTF_8),
+                executeNo.getBytes(StandardCharsets.UTF_8),
+                String.valueOf(leaseSec).getBytes(StandardCharsets.UTF_8)
+        ), true);
+        return result != null && result == 1L;
+    }
+
+    @Override
+    public boolean releaseLease(long taskId, String executeNo) {
+        Long result = redisTemplate.execute(connection -> (Long) connection.scriptingCommands().eval(
+                RELEASE_LEASE_ONLY_SCRIPT.getBytes(StandardCharsets.UTF_8), ReturnType.INTEGER, 1,
                 RedisKeys.taskLease(taskId).getBytes(StandardCharsets.UTF_8),
                 executeNo.getBytes(StandardCharsets.UTF_8)
         ), true);

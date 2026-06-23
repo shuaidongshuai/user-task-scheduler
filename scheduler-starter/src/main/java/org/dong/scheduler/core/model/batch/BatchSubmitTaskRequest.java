@@ -65,6 +65,14 @@ public class BatchSubmitTaskRequest {
      */
     private Integer executeTimeoutSec;
     /**
+     * WAIT_HOLD 模式最多允许轮转次数；为空时使用全局默认值。
+     */
+    private Integer holdMaxRounds;
+    /**
+     * WAIT_HOLD 模式每轮继续执行前的等待时间（秒）；为空时使用全局默认值。
+     */
+    private Integer holdRetryDelaySec;
+    /**
      * 单任务重试间隔（秒），可选；为空时使用全局 defaultRetryDelaySec。
      */
     private Integer retryDelaySec;

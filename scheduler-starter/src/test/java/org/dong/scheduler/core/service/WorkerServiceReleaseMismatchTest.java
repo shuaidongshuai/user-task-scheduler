@@ -22,6 +22,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -160,5 +161,66 @@ class WorkerServiceReleaseMismatchTest {
                 eq("task handler returned null result"), any(LocalDateTime.class));
         verify(taskRepository).finishExecution(eq("exec-null"), eq(org.dong.scheduler.core.enums.TaskStatus.FAILED),
                 eq("TASK_HANDLER_NULL_RESULT"), eq("task handler returned null result"), any(LocalDateTime.class));
+    }
+
+    @Test
+    void shouldKeepConcurrencyAndMoveTaskToWaitHoldWhenHandlerRequestsHold() throws Exception {
+        SchedulerProperties properties = new SchedulerProperties();
+        properties.setInstanceId("ins-test");
+        properties.setWorkerThreads(2);
+        properties.setHeartbeatIntervalSec(60);
+        properties.setDefaultExecuteTimeoutSec(5);
+
+        workerExecutor = new ThreadPoolTaskExecutor();
+        workerExecutor.setCorePoolSize(1);
+        workerExecutor.setMaxPoolSize(1);
+        workerExecutor.setQueueCapacity(8);
+        workerExecutor.initialize();
+
+        when(taskHandler.bizTypes()).thenReturn(List.of("demo.biz"));
+        when(taskHandler.execute(any(SchedulerTask.class))).thenAnswer(invocation -> {
+            SchedulerTask task = invocation.getArgument(0);
+            task.setExtInfo("{\"phase\":\"polling\"}");
+            return TaskExecuteResult.waitHold();
+        });
+
+        TaskHandlerRegistry registry = new TaskHandlerRegistry(List.of(taskHandler));
+        BusinessTaskStateProviderRegistry stateProviderRegistry = new BusinessTaskStateProviderRegistry(List.of());
+        workerService = new WorkerService(
+                properties,
+                taskRepository,
+                registry,
+                concurrencyGuard,
+                queueRedisService,
+                recoveryService,
+                workerExecutor,
+                stateProviderRegistry,
+                taskStateService
+        );
+
+        SchedulerTask task = new SchedulerTask();
+        task.setId(1L);
+        task.setTaskNo("task-1");
+        task.setGroupCode("g1");
+        task.setUserId("u1");
+        task.setBizType("demo.biz");
+        task.setExecuteAt(LocalDateTime.now());
+        task.setMaxRetryCount(3);
+        task.setHoldRetryDelaySec(7);
+        task.setHoldRoundCount(0);
+        task.setHoldMaxRounds(5);
+
+        GroupConfig cfg = new GroupConfig();
+        cfg.setLockExpireSec(30);
+
+        workerService.executeDirect(task, cfg, "exec-hold");
+
+        verify(taskRepository).markWaitHold(eq(1L), any(LocalDateTime.class), eq("{\"phase\":\"polling\"}"), any(LocalDateTime.class));
+        verify(taskRepository).updateExtInfo(eq(1L), eq("{\"phase\":\"polling\"}"), any(LocalDateTime.class));
+        verify(taskRepository, never()).markWaitRetry(anyLong(), any(LocalDateTime.class), anyString(), anyString(), any(LocalDateTime.class));
+        verify(concurrencyGuard, never()).release("g1", "u1", 1L, "exec-hold");
+        verify(concurrencyGuard).releaseLease(1L, "exec-hold");
+        verify(taskRepository).finishExecution(eq("exec-hold"), eq(org.dong.scheduler.core.enums.TaskStatus.WAIT_HOLD),
+                any(), any(), any(LocalDateTime.class));
     }
 }

@@ -20,6 +20,9 @@ public class SchedulerTask {
     private LocalDateTime nextRetryAt;
     private int retryCount;
     private int maxRetryCount;
+    private int holdRoundCount;
+    private int holdMaxRounds;
+    private int holdRetryDelaySec;
     private Integer executeTimeoutSec;
     private Integer retryDelaySec;
     private Integer maxWaitSec;
@@ -42,7 +45,7 @@ public class SchedulerTask {
     }
 
     public boolean runnableStatus() {
-        return status == TaskStatus.RUNNABLE || status == TaskStatus.WAIT_RETRY;
+        return status == TaskStatus.RUNNABLE || status == TaskStatus.WAIT_RETRY || status == TaskStatus.WAIT_HOLD;
     }
 
     public boolean due(LocalDateTime now) {
@@ -55,5 +58,9 @@ public class SchedulerTask {
 
     public int retryDelaySec(int defaultRetryDelaySec) {
         return retryDelaySec == null || retryDelaySec < 0 ? defaultRetryDelaySec : retryDelaySec;
+    }
+
+    public boolean holdRoundsExhausted() {
+        return holdRoundCount >= holdMaxRounds;
     }
 }

@@ -160,6 +160,27 @@ public class WorkerService {
                 finalStatus = TaskStatus.SUCCESS;
                 log.info("task execute success, taskId={}, taskNo={}, executeNo={}",
                         task.getId(), task.getTaskNo(), executeNo);
+            } else if (result.isWaitHold()) {
+                if (task.getHoldRoundCount() + 1 > task.getHoldMaxRounds()) {
+                    errorCode = "WAIT_HOLD_ROUNDS_EXHAUSTED";
+                    errorMsg = "wait hold rounds exhausted";
+                    taskStateService.markFailed(task.getId(), errorCode, errorMsg, LocalDateTime.now());
+                    finalStatus = TaskStatus.FAILED;
+                    log.error("task wait hold exhausted, taskId={}, taskNo={}, executeNo={}, holdRoundCount={}, holdMaxRounds={}",
+                            task.getId(), task.getTaskNo(), executeNo, task.getHoldRoundCount(), task.getHoldMaxRounds());
+                } else {
+                    LocalDateTime nextHoldTime = nextHoldTime(task);
+                    boolean deferred = taskRepository.markWaitHold(task.getId(), nextHoldTime, task.getExtInfo(), LocalDateTime.now());
+                    if (deferred) {
+                        task.setStatus(TaskStatus.WAIT_HOLD);
+                        task.setExecuteAt(nextHoldTime);
+                        task.setHoldRoundCount(task.getHoldRoundCount() + 1);
+                        queueRedisService.enqueue(task);
+                    }
+                    finalStatus = TaskStatus.WAIT_HOLD;
+                    log.info("task enter wait hold, taskId={}, taskNo={}, executeNo={}, nextExecuteAt={}, holdRoundCount={}/{}",
+                            task.getId(), task.getTaskNo(), executeNo, nextHoldTime, task.getHoldRoundCount(), task.getHoldMaxRounds());
+                }
             } else if ("TASK_TIMEOUT_UNINTERRUPTIBLE".equals(result.getErrorCode())) {
                 errorCode = result.getErrorCode();
                 errorMsg = result.getErrorMsg();
@@ -210,13 +231,17 @@ public class WorkerService {
             }
         } finally {
             heartbeat.cancel(true);
-            boolean released = concurrencyGuard.release(task.getGroupCode(), task.getUserId(), task.getId(), executeNo);
-            if (!released) {
-                String currentLease = concurrencyGuard.leaseValue(task.getId());
-                log.warn("worker release mismatch, skip blind repair to avoid decrementing another execution "
-                                + "counters, taskId={}, taskNo={}, executeNo={}, currentLease={}, group={}, user={}",
-                        task.getId(), task.getTaskNo(), executeNo, currentLease, task.getGroupCode(), task.getUserId());
-                recoveryService.reconcileRunningCountersImmediately(task.getGroupCode(), task.getUserId(), "worker-release-mismatch");
+            if (finalStatus == TaskStatus.WAIT_HOLD) {
+                concurrencyGuard.releaseLease(task.getId(), executeNo);
+            } else {
+                boolean released = concurrencyGuard.release(task.getGroupCode(), task.getUserId(), task.getId(), executeNo);
+                if (!released) {
+                    String currentLease = concurrencyGuard.leaseValue(task.getId());
+                    log.warn("worker release mismatch, skip blind repair to avoid decrementing another execution "
+                                    + "counters, taskId={}, taskNo={}, executeNo={}, currentLease={}, group={}, user={}",
+                            task.getId(), task.getTaskNo(), executeNo, currentLease, task.getGroupCode(), task.getUserId());
+                    recoveryService.reconcileRunningCountersImmediately(task.getGroupCode(), task.getUserId(), "worker-release-mismatch");
+                }
             }
             taskRepository.finishExecution(executeNo, finalStatus, errorCode, errorMsg, LocalDateTime.now());
             long cost = System.currentTimeMillis() - begin;
@@ -279,6 +304,10 @@ public class WorkerService {
 
     private LocalDateTime nextRetryTime(SchedulerTask task) {
         return LocalDateTime.now().plusSeconds(task.retryDelaySec(properties.getDefaultRetryDelaySec()));
+    }
+
+    private LocalDateTime nextHoldTime(SchedulerTask task) {
+        return LocalDateTime.now().plusSeconds(task.getHoldRetryDelaySec());
     }
 
     private void persistTaskExtInfo(SchedulerTask task) {

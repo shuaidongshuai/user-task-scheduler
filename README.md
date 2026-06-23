@@ -17,6 +17,7 @@
 - 任务编排：支持 DAG 任务组批量运行
 - 任务降级：支持超时自动降级任务（自定义超时的降级任务）
 - 任务重试：失败重试与延迟重试
+- 长轮询任务：支持 `WAIT_HOLD` 模式，等待外部系统结果时释放 worker 线程但持续占用并发
 - 故障恢复：宕机恢复（服务重启或redis数据丢失自动恢复）
 - 扩展：`ext_info` 跨重试透传（支持多阶段任务）
 
@@ -68,6 +69,8 @@ utask:
     worker-threads: 16
     heartbeat-interval-sec: 10
     default-retry-delay-sec: 15
+    wait-hold-max-rounds: 1000
+    wait-hold-default-delay-sec: 3
     default-execute-timeout-sec: 600
 ```
 
@@ -102,6 +105,8 @@ public void submitDemo() {
             .setBizType("image.render")
             .setBizKey("biz-key-001")
             .setPriority(90)
+            .setHoldMaxRounds(300)
+            .setHoldRetryDelaySec(5)
             .setRetryDelaySec(20)
             .setExtInfo("{\"prompt\":\"hello\"}");
     long taskId = schedulerClient.submit(req);
@@ -244,6 +249,48 @@ BatchSubmitRequest request = new BatchSubmitRequest(List.of(
 
 schedulerClient.submitBatch(request);
 ```
+
+### WAIT_HOLD：长轮询/外部异步任务
+
+适用场景：
+
+- 业务先提交一个外部异步任务
+- 后续需要每隔几秒轮询外部结果
+- 整个生命周期都希望持续占用同一路 group/user 并发
+- 但不希望轮询等待期间长期占住 worker 线程
+
+处理方式：
+
+- `TaskHandler` 返回 `TaskExecuteResult.waitHold()`
+- 框架将任务状态写为 `WAIT_HOLD`
+- 同时保留 group/user running 计数，不释放并发
+- 释放当前这轮执行 lease 和 worker 线程
+- 按任务上的 `hold_retry_delay_sec` 重新计算下一次 `execute_at`
+- 任务重新进入 time queue，到期后再被 promote 到 ready queue
+- 调度恢复时只抢本轮 task lease，不重复增加并发计数
+
+任务级参数：
+
+- `holdMaxRounds`：最多允许多少轮 `WAIT_HOLD`
+- `holdRetryDelaySec`：每轮等待多少秒后再继续执行
+
+这两个参数不传时，分别回退到全局配置：
+
+- `utask.scheduler.wait-hold-max-rounds`
+- `utask.scheduler.wait-hold-default-delay-sec`
+
+重要语义：
+
+- `WAIT_HOLD` 与 `WAIT_RETRY` 不同
+- `WAIT_RETRY` 是失败后重试，会释放并发
+- `WAIT_HOLD` 是运行中挂起，不释放并发
+- `ext_info` 仍然完全由业务侧维护，框架只负责透传和持久化
+
+推荐业务写法：
+
+- 首次执行：提交远端任务，把 `remoteJobId` 写入 `ext_info`，返回 `waitHold()`
+- 后续执行：根据 `ext_info` 直接轮询远端任务，不重复 submit
+- 终态时返回 `success()` 或 `failed(...)`
 
 ### 业务状态短路（可选）
 

@@ -45,6 +45,8 @@ public class DemoController {
                 .setPriority(request.priority() == null ? 50 : request.priority())
                 .setExecuteAt(request.executeAt())
                 .setMaxRetryCount(request.maxRetryCount())
+                .setHoldMaxRounds(request.holdMaxRounds())
+                .setHoldRetryDelaySec(request.holdRetryDelaySec())
                 .setExecuteTimeoutSec(request.executeTimeoutSec() == null ? 1 : request.executeTimeoutSec())
                 .setRetryDelaySec(request.retryDelaySec())
                 .setDependencies(request.dependencies())
@@ -76,6 +78,8 @@ public class DemoController {
                     .setPriority(task.priority() == null ? 50 : task.priority())
                     .setExecuteAt(task.executeAt())
                     .setMaxRetryCount(task.maxRetryCount())
+                    .setHoldMaxRounds(task.holdMaxRounds())
+                    .setHoldRetryDelaySec(task.holdRetryDelaySec())
                     .setExecuteTimeoutSec(task.executeTimeoutSec() == null ? 1 : task.executeTimeoutSec())
                     .setRetryDelaySec(task.retryDelaySec())
                     .setExtInfo(task.extInfo() == null || task.extInfo().isBlank()
@@ -104,6 +108,8 @@ public class DemoController {
             String bizKey,
             Integer priority,
             Integer maxRetryCount,
+            Integer holdMaxRounds,
+            Integer holdRetryDelaySec,
             Integer executeTimeoutSec,
             Integer retryDelaySec,
             LocalDateTime executeAt,
@@ -126,6 +132,8 @@ public class DemoController {
             String bizKey,
             Integer priority,
             Integer maxRetryCount,
+            Integer holdMaxRounds,
+            Integer holdRetryDelaySec,
             Integer executeTimeoutSec,
             Integer retryDelaySec,
             LocalDateTime executeAt,

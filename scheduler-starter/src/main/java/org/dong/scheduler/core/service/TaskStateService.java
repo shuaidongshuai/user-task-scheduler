@@ -186,6 +186,9 @@ public class TaskStateService {
             if (!cancelled) {
                 return new TerminalTransitionResult(false, List.of());
             }
+            if (task.getStatus() == TaskStatus.WAIT_HOLD) {
+                concurrencyGuard.repairRelease(task.getGroupCode(), task.getUserId());
+            }
             List<SchedulerTask> queueTasks = taskDependencyService.onUpstreamTaskTerminal(
                     task.getId(),
                     TaskStatus.CANCELLED,

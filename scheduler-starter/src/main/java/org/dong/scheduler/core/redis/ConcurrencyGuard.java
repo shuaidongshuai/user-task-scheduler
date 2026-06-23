@@ -9,6 +9,10 @@ public interface ConcurrencyGuard {
 
     boolean release(String groupCode, String userId, long taskId, String executeNo);
 
+    boolean acquireLease(long taskId, String executeNo, int leaseSec);
+
+    boolean releaseLease(long taskId, String executeNo);
+
     boolean renewLease(long taskId, String executeNo, int leaseSec);
 
     void repairRelease(String groupCode, String userId);

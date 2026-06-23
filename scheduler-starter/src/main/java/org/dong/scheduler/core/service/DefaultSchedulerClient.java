@@ -185,6 +185,16 @@ public class DefaultSchedulerClient implements SchedulerClient {
         if (request.getRetryDelaySec() != null && request.getRetryDelaySec() < 0) {
             request.setRetryDelaySec(0);
         }
+        if (request.getHoldMaxRounds() == null) {
+            request.setHoldMaxRounds(properties.getWaitHoldMaxRounds());
+        } else if (request.getHoldMaxRounds() < 0) {
+            request.setHoldMaxRounds(0);
+        }
+        if (request.getHoldRetryDelaySec() == null) {
+            request.setHoldRetryDelaySec(properties.getWaitHoldDefaultDelaySec());
+        } else if (request.getHoldRetryDelaySec() < 0) {
+            request.setHoldRetryDelaySec(0);
+        }
         if (request.getMaxWaitSec() != null) {
             if (request.getMaxWaitSec() <= 0) {
                 throw new IllegalArgumentException(MAX_WAIT_ERROR);
@@ -256,6 +266,8 @@ public class DefaultSchedulerClient implements SchedulerClient {
                     .setExecuteAt(task.getExecuteAt())
                     .setMaxRetryCount(task.getMaxRetryCount())
                     .setExecuteTimeoutSec(task.getExecuteTimeoutSec())
+                    .setHoldMaxRounds(task.getHoldMaxRounds())
+                    .setHoldRetryDelaySec(task.getHoldRetryDelaySec())
                     .setRetryDelaySec(task.getRetryDelaySec())
                     .setMaxWaitSec(task.getMaxWaitSec())
                     .setExtInfo(task.getExtInfo())

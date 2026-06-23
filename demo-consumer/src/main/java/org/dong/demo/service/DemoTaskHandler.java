@@ -8,7 +8,9 @@ import org.dong.scheduler.core.model.TaskExecuteResult;
 import org.dong.scheduler.core.spi.TaskHandler;
 import org.springframework.stereotype.Component;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 @Component
 @Slf4j
@@ -33,14 +35,28 @@ public class DemoTaskHandler implements TaskHandler {
             return TaskExecuteResult.failed("MISSING_BIZ_KEY", "bizKey is required", false);
         }
 
-        DemoExecutionOptions options = parseOptions(task.getExtInfo());
+        Map<String, Object> ext = parseExt(task.getExtInfo());
+        DemoExecutionOptions options = parseOptions(ext);
         int failBeforeSuccess = options.failBeforeSuccess == null ? 2 : Math.max(0, options.failBeforeSuccess);
+        int waitHoldRoundsBeforeSuccess = options.waitHoldRoundsBeforeSuccess == null
+                ? 0
+                : Math.max(0, options.waitHoldRoundsBeforeSuccess);
         long sleepMs = options.sleepMs == null ? 2_000L : Math.max(0L, options.sleepMs);
+
+        if (waitHoldRoundsBeforeSuccess > 0 && task.getHoldRoundCount() < waitHoldRoundsBeforeSuccess) {
+            demoBizTaskRepository.updateStatus(bizKey, "POLLING");
+            ext.put("phase", "POLLING");
+            ext.put("observedHoldRound", task.getHoldRoundCount() + 1);
+            task.setExtInfo(writeExt(ext));
+            log.info("task wait hold, taskId={}, bizKey={}, holdRound={}/{}",
+                    task.getId(), bizKey, task.getHoldRoundCount() + 1, waitHoldRoundsBeforeSuccess);
+            return TaskExecuteResult.waitHold();
+        }
 
         if (task.getRetryCount() < failBeforeSuccess) {
             demoBizTaskRepository.updateStatus(bizKey, "RUNNING");
-            String nextExtInfo = "{\"last_retry_count\":" + (task.getRetryCount() + 1) + "}";
-            task.setExtInfo(nextExtInfo);
+            ext.put("last_retry_count", task.getRetryCount() + 1);
+            task.setExtInfo(writeExt(ext));
             log.info("simulate retryable fail before success, taskId={}, bizKey={}, retryCount={}",
                     task.getId(), bizKey, task.getRetryCount());
             return TaskExecuteResult.failed("RETRYABLE_FAIL", "simulated retry before success", true);
@@ -49,24 +65,40 @@ public class DemoTaskHandler implements TaskHandler {
         demoBizTaskRepository.updateStatus(bizKey, "RUNNING");
         Thread.sleep(sleepMs);
         demoBizTaskRepository.updateStatus(bizKey, "SUCCESS");
+        ext.put("phase", "SUCCESS");
+        task.setExtInfo(writeExt(ext));
         log.info("task success, taskId={}, bizKey={}, extInfo={}", task.getId(), bizKey, task.getExtInfo());
         return TaskExecuteResult.success();
     }
 
-    private DemoExecutionOptions parseOptions(String extInfo) {
+    private Map<String, Object> parseExt(String extInfo) {
         if (extInfo == null || extInfo.isBlank()) {
-            return new DemoExecutionOptions();
+            return new LinkedHashMap<>();
         }
         try {
-            return objectMapper.readValue(extInfo, DemoExecutionOptions.class);
+            return objectMapper.readValue(extInfo, objectMapper.getTypeFactory().constructMapType(LinkedHashMap.class, String.class, Object.class));
         } catch (Exception ex) {
             log.warn("parse extInfo failed, fallback to default demo behavior, extInfo={}", extInfo, ex);
-            return new DemoExecutionOptions();
+            return new LinkedHashMap<>();
+        }
+    }
+
+    private DemoExecutionOptions parseOptions(Map<String, Object> ext) {
+        return objectMapper.convertValue(ext, DemoExecutionOptions.class);
+    }
+
+    private String writeExt(Map<String, Object> ext) {
+        try {
+            return objectMapper.writeValueAsString(ext);
+        } catch (Exception ex) {
+            log.warn("write extInfo failed, fallback to empty json, ext={}", ext, ex);
+            return "{}";
         }
     }
 
     private static final class DemoExecutionOptions {
         private Integer failBeforeSuccess;
+        private Integer waitHoldRoundsBeforeSuccess;
         private Long sleepMs;
 
         public Integer getFailBeforeSuccess() {
@@ -83,6 +115,14 @@ public class DemoTaskHandler implements TaskHandler {
 
         public void setSleepMs(Long sleepMs) {
             this.sleepMs = sleepMs;
+        }
+
+        public Integer getWaitHoldRoundsBeforeSuccess() {
+            return waitHoldRoundsBeforeSuccess;
+        }
+
+        public void setWaitHoldRoundsBeforeSuccess(Integer waitHoldRoundsBeforeSuccess) {
+            this.waitHoldRoundsBeforeSuccess = waitHoldRoundsBeforeSuccess;
         }
     }
 }

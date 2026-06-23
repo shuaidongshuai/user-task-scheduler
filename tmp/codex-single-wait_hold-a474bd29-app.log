@@ -1,0 +1,162 @@
+
+  .   ____          _            __ _ _
+ /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
+( ( )\___ | '_ | '_| | '_ \/ _` | \ \ \ \
+ \\/  ___)| |_)| | | | | || (_| |  ) ) ) )
+  '  |____| .__|_| |_|_| |_\__, | / / / /
+ =========|_|==============|___/=/_/_/_/
+
+ :: Spring Boot ::                (v3.3.5)
+
+2026-06-24T00:16:21.758+08:00  INFO [trace_id:] 97191 --- [           main] org.dong.demo.DemoConsumerApplication    : Starting DemoConsumerApplication v1.0-SNAPSHOT using Java 21.0.1 with PID 97191 (/Users/chenmingdong01/Documents/github/user-task-scheduler/demo-consumer/target/demo-consumer-1.0-SNAPSHOT.jar started by chenmingdong01 in /Users/chenmingdong01/Documents/github/user-task-scheduler)
+2026-06-24T00:16:21.762+08:00 DEBUG [trace_id:] 97191 --- [           main] org.dong.demo.DemoConsumerApplication    : Running with Spring Boot v3.3.5, Spring v6.1.14
+2026-06-24T00:16:21.762+08:00  INFO [trace_id:] 97191 --- [           main] org.dong.demo.DemoConsumerApplication    : No active profile set, falling back to 1 default profile: "default"
+2026-06-24T00:16:23.308+08:00  INFO [trace_id:] 97191 --- [           main] .s.d.r.c.RepositoryConfigurationDelegate : Multiple Spring Data modules found, entering strict repository configuration mode
+2026-06-24T00:16:23.310+08:00  INFO [trace_id:] 97191 --- [           main] .s.d.r.c.RepositoryConfigurationDelegate : Bootstrapping Spring Data Redis repositories in DEFAULT mode.
+2026-06-24T00:16:23.376+08:00  INFO [trace_id:] 97191 --- [           main] .s.d.r.c.RepositoryConfigurationDelegate : Finished Spring Data repository scanning in 31 ms. Found 0 Redis repository interfaces.
+2026-06-24T00:16:24.034+08:00  INFO [trace_id:] 97191 --- [           main] o.s.b.w.embedded.tomcat.TomcatWebServer  : Tomcat initialized with port 18119 (http)
+2026-06-24T00:16:24.050+08:00  INFO [trace_id:] 97191 --- [           main] o.apache.catalina.core.StandardService   : Starting service [Tomcat]
+2026-06-24T00:16:24.050+08:00  INFO [trace_id:] 97191 --- [           main] o.apache.catalina.core.StandardEngine    : Starting Servlet engine: [Apache Tomcat/10.1.31]
+2026-06-24T00:16:24.086+08:00  INFO [trace_id:] 97191 --- [           main] o.a.c.c.C.[Tomcat].[localhost].[/]       : Initializing Spring embedded WebApplicationContext
+2026-06-24T00:16:24.087+08:00  INFO [trace_id:] 97191 --- [           main] w.s.c.ServletWebServerApplicationContext : Root WebApplicationContext: initialization completed in 2248 ms
+2026-06-24T00:16:25.117+08:00  INFO [trace_id:] 97191 --- [           main] o.s.b.w.embedded.tomcat.TomcatWebServer  : Tomcat started on port 18119 (http) with context path '/'
+2026-06-24T00:16:25.136+08:00  INFO [trace_id:] 97191 --- [           main] org.dong.demo.DemoConsumerApplication    : Started DemoConsumerApplication in 5.434 seconds (process running for 6.03)
+2026-06-24T00:16:25.144+08:00  INFO [trace_id:] 97191 --- [           main] com.zaxxer.hikari.HikariDataSource       : scheduler-hikari - Starting...
+2026-06-24T00:16:25.442+08:00  INFO [trace_id:] 97191 --- [io-18119-exec-1] o.a.c.c.C.[Tomcat].[localhost].[/]       : Initializing Spring DispatcherServlet 'dispatcherServlet'
+2026-06-24T00:16:25.442+08:00  INFO [trace_id:] 97191 --- [io-18119-exec-1] o.s.web.servlet.DispatcherServlet        : Initializing Servlet 'dispatcherServlet'
+2026-06-24T00:16:25.444+08:00  INFO [trace_id:] 97191 --- [io-18119-exec-1] o.s.web.servlet.DispatcherServlet        : Completed initialization in 1 ms
+2026-06-24T00:16:25.493+08:00 ERROR [trace_id:] 97191 --- [io-18119-exec-2] o.a.c.c.C.[.[.[/].[dispatcherServlet]    : Servlet.service() for servlet [dispatcherServlet] in context with path [] threw exception [Request processing failed: java.lang.IllegalArgumentException: Name for argument of type [java.lang.String] not specified, and parameter name information not available via reflection. Ensure that the compiler uses the '-parameters' flag.] with root cause
+
+java.lang.IllegalArgumentException: Name for argument of type [java.lang.String] not specified, and parameter name information not available via reflection. Ensure that the compiler uses the '-parameters' flag.
+	at org.springframework.web.method.annotation.AbstractNamedValueMethodArgumentResolver.updateNamedValueInfo(AbstractNamedValueMethodArgumentResolver.java:186) ~[spring-web-6.1.14.jar!/:6.1.14]
+	at org.springframework.web.method.annotation.AbstractNamedValueMethodArgumentResolver.getNamedValueInfo(AbstractNamedValueMethodArgumentResolver.java:161) ~[spring-web-6.1.14.jar!/:6.1.14]
+	at org.springframework.web.method.annotation.AbstractNamedValueMethodArgumentResolver.resolveArgument(AbstractNamedValueMethodArgumentResolver.java:107) ~[spring-web-6.1.14.jar!/:6.1.14]
+	at org.springframework.web.method.support.HandlerMethodArgumentResolverComposite.resolveArgument(HandlerMethodArgumentResolverComposite.java:122) ~[spring-web-6.1.14.jar!/:6.1.14]
+	at org.springframework.web.method.support.InvocableHandlerMethod.getMethodArgumentValues(InvocableHandlerMethod.java:224) ~[spring-web-6.1.14.jar!/:6.1.14]
+	at org.springframework.web.method.support.InvocableHandlerMethod.invokeForRequest(InvocableHandlerMethod.java:178) ~[spring-web-6.1.14.jar!/:6.1.14]
+	at org.springframework.web.servlet.mvc.method.annotation.ServletInvocableHandlerMethod.invokeAndHandle(ServletInvocableHandlerMethod.java:118) ~[spring-webmvc-6.1.14.jar!/:6.1.14]
+	at org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerAdapter.invokeHandlerMethod(RequestMappingHandlerAdapter.java:926) ~[spring-webmvc-6.1.14.jar!/:6.1.14]
+	at org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerAdapter.handleInternal(RequestMappingHandlerAdapter.java:831) ~[spring-webmvc-6.1.14.jar!/:6.1.14]
+	at org.springframework.web.servlet.mvc.method.AbstractHandlerMethodAdapter.handle(AbstractHandlerMethodAdapter.java:87) ~[spring-webmvc-6.1.14.jar!/:6.1.14]
+	at org.springframework.web.servlet.DispatcherServlet.doDispatch(DispatcherServlet.java:1089) ~[spring-webmvc-6.1.14.jar!/:6.1.14]
+	at org.springframework.web.servlet.DispatcherServlet.doService(DispatcherServlet.java:979) ~[spring-webmvc-6.1.14.jar!/:6.1.14]
+	at org.springframework.web.servlet.FrameworkServlet.processRequest(FrameworkServlet.java:1014) ~[spring-webmvc-6.1.14.jar!/:6.1.14]
+	at org.springframework.web.servlet.FrameworkServlet.doGet(FrameworkServlet.java:903) ~[spring-webmvc-6.1.14.jar!/:6.1.14]
+	at jakarta.servlet.http.HttpServlet.service(HttpServlet.java:564) ~[tomcat-embed-core-10.1.31.jar!/:na]
+	at org.springframework.web.servlet.FrameworkServlet.service(FrameworkServlet.java:885) ~[spring-webmvc-6.1.14.jar!/:6.1.14]
+	at jakarta.servlet.http.HttpServlet.service(HttpServlet.java:658) ~[tomcat-embed-core-10.1.31.jar!/:na]
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:195) ~[tomcat-embed-core-10.1.31.jar!/:na]
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:140) ~[tomcat-embed-core-10.1.31.jar!/:na]
+	at org.apache.tomcat.websocket.server.WsFilter.doFilter(WsFilter.java:51) ~[tomcat-embed-websocket-10.1.31.jar!/:na]
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:164) ~[tomcat-embed-core-10.1.31.jar!/:na]
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:140) ~[tomcat-embed-core-10.1.31.jar!/:na]
+	at org.springframework.web.filter.RequestContextFilter.doFilterInternal(RequestContextFilter.java:100) ~[spring-web-6.1.14.jar!/:6.1.14]
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116) ~[spring-web-6.1.14.jar!/:6.1.14]
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:164) ~[tomcat-embed-core-10.1.31.jar!/:na]
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:140) ~[tomcat-embed-core-10.1.31.jar!/:na]
+	at org.springframework.web.filter.FormContentFilter.doFilterInternal(FormContentFilter.java:93) ~[spring-web-6.1.14.jar!/:6.1.14]
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116) ~[spring-web-6.1.14.jar!/:6.1.14]
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:164) ~[tomcat-embed-core-10.1.31.jar!/:na]
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:140) ~[tomcat-embed-core-10.1.31.jar!/:na]
+	at org.springframework.web.filter.CharacterEncodingFilter.doFilterInternal(CharacterEncodingFilter.java:201) ~[spring-web-6.1.14.jar!/:6.1.14]
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116) ~[spring-web-6.1.14.jar!/:6.1.14]
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:164) ~[tomcat-embed-core-10.1.31.jar!/:na]
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:140) ~[tomcat-embed-core-10.1.31.jar!/:na]
+	at org.apache.catalina.core.StandardWrapperValve.invoke(StandardWrapperValve.java:167) ~[tomcat-embed-core-10.1.31.jar!/:na]
+	at org.apache.catalina.core.StandardContextValve.invoke(StandardContextValve.java:90) ~[tomcat-embed-core-10.1.31.jar!/:na]
+	at org.apache.catalina.authenticator.AuthenticatorBase.invoke(AuthenticatorBase.java:483) ~[tomcat-embed-core-10.1.31.jar!/:na]
+	at org.apache.catalina.core.StandardHostValve.invoke(StandardHostValve.java:115) ~[tomcat-embed-core-10.1.31.jar!/:na]
+	at org.apache.catalina.valves.ErrorReportValve.invoke(ErrorReportValve.java:93) ~[tomcat-embed-core-10.1.31.jar!/:na]
+	at org.apache.catalina.core.StandardEngineValve.invoke(StandardEngineValve.java:74) ~[tomcat-embed-core-10.1.31.jar!/:na]
+	at org.apache.catalina.connector.CoyoteAdapter.service(CoyoteAdapter.java:344) ~[tomcat-embed-core-10.1.31.jar!/:na]
+	at org.apache.coyote.http11.Http11Processor.service(Http11Processor.java:384) ~[tomcat-embed-core-10.1.31.jar!/:na]
+	at org.apache.coyote.AbstractProcessorLight.process(AbstractProcessorLight.java:63) ~[tomcat-embed-core-10.1.31.jar!/:na]
+	at org.apache.coyote.AbstractProtocol$ConnectionHandler.process(AbstractProtocol.java:905) ~[tomcat-embed-core-10.1.31.jar!/:na]
+	at org.apache.tomcat.util.net.NioEndpoint$SocketProcessor.doRun(NioEndpoint.java:1741) ~[tomcat-embed-core-10.1.31.jar!/:na]
+	at org.apache.tomcat.util.net.SocketProcessorBase.run(SocketProcessorBase.java:52) ~[tomcat-embed-core-10.1.31.jar!/:na]
+	at org.apache.tomcat.util.threads.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1190) ~[tomcat-embed-core-10.1.31.jar!/:na]
+	at org.apache.tomcat.util.threads.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:659) ~[tomcat-embed-core-10.1.31.jar!/:na]
+	at org.apache.tomcat.util.threads.TaskThread$WrappingRunnable.run(TaskThread.java:63) ~[tomcat-embed-core-10.1.31.jar!/:na]
+	at java.base/java.lang.Thread.run(Thread.java:1583) ~[na:na]
+
+2026-06-24T00:16:25.493+08:00 ERROR [trace_id:] 97191 --- [io-18119-exec-1] o.a.c.c.C.[.[.[/].[dispatcherServlet]    : Servlet.service() for servlet [dispatcherServlet] in context with path [] threw exception [Request processing failed: java.lang.IllegalArgumentException: Name for argument of type [java.lang.String] not specified, and parameter name information not available via reflection. Ensure that the compiler uses the '-parameters' flag.] with root cause
+
+java.lang.IllegalArgumentException: Name for argument of type [java.lang.String] not specified, and parameter name information not available via reflection. Ensure that the compiler uses the '-parameters' flag.
+	at org.springframework.web.method.annotation.AbstractNamedValueMethodArgumentResolver.updateNamedValueInfo(AbstractNamedValueMethodArgumentResolver.java:186) ~[spring-web-6.1.14.jar!/:6.1.14]
+	at org.springframework.web.method.annotation.AbstractNamedValueMethodArgumentResolver.getNamedValueInfo(AbstractNamedValueMethodArgumentResolver.java:161) ~[spring-web-6.1.14.jar!/:6.1.14]
+	at org.springframework.web.method.annotation.AbstractNamedValueMethodArgumentResolver.resolveArgument(AbstractNamedValueMethodArgumentResolver.java:107) ~[spring-web-6.1.14.jar!/:6.1.14]
+	at org.springframework.web.method.support.HandlerMethodArgumentResolverComposite.resolveArgument(HandlerMethodArgumentResolverComposite.java:122) ~[spring-web-6.1.14.jar!/:6.1.14]
+	at org.springframework.web.method.support.InvocableHandlerMethod.getMethodArgumentValues(InvocableHandlerMethod.java:224) ~[spring-web-6.1.14.jar!/:6.1.14]
+	at org.springframework.web.method.support.InvocableHandlerMethod.invokeForRequest(InvocableHandlerMethod.java:178) ~[spring-web-6.1.14.jar!/:6.1.14]
+	at org.springframework.web.servlet.mvc.method.annotation.ServletInvocableHandlerMethod.invokeAndHandle(ServletInvocableHandlerMethod.java:118) ~[spring-webmvc-6.1.14.jar!/:6.1.14]
+	at org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerAdapter.invokeHandlerMethod(RequestMappingHandlerAdapter.java:926) ~[spring-webmvc-6.1.14.jar!/:6.1.14]
+	at org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerAdapter.handleInternal(RequestMappingHandlerAdapter.java:831) ~[spring-webmvc-6.1.14.jar!/:6.1.14]
+	at org.springframework.web.servlet.mvc.method.AbstractHandlerMethodAdapter.handle(AbstractHandlerMethodAdapter.java:87) ~[spring-webmvc-6.1.14.jar!/:6.1.14]
+	at org.springframework.web.servlet.DispatcherServlet.doDispatch(DispatcherServlet.java:1089) ~[spring-webmvc-6.1.14.jar!/:6.1.14]
+	at org.springframework.web.servlet.DispatcherServlet.doService(DispatcherServlet.java:979) ~[spring-webmvc-6.1.14.jar!/:6.1.14]
+	at org.springframework.web.servlet.FrameworkServlet.processRequest(FrameworkServlet.java:1014) ~[spring-webmvc-6.1.14.jar!/:6.1.14]
+	at org.springframework.web.servlet.FrameworkServlet.doGet(FrameworkServlet.java:903) ~[spring-webmvc-6.1.14.jar!/:6.1.14]
+	at jakarta.servlet.http.HttpServlet.service(HttpServlet.java:564) ~[tomcat-embed-core-10.1.31.jar!/:na]
+	at org.springframework.web.servlet.FrameworkServlet.service(FrameworkServlet.java:885) ~[spring-webmvc-6.1.14.jar!/:6.1.14]
+	at jakarta.servlet.http.HttpServlet.service(HttpServlet.java:658) ~[tomcat-embed-core-10.1.31.jar!/:na]
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:195) ~[tomcat-embed-core-10.1.31.jar!/:na]
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:140) ~[tomcat-embed-core-10.1.31.jar!/:na]
+	at org.apache.tomcat.websocket.server.WsFilter.doFilter(WsFilter.java:51) ~[tomcat-embed-websocket-10.1.31.jar!/:na]
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:164) ~[tomcat-embed-core-10.1.31.jar!/:na]
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:140) ~[tomcat-embed-core-10.1.31.jar!/:na]
+	at org.springframework.web.filter.RequestContextFilter.doFilterInternal(RequestContextFilter.java:100) ~[spring-web-6.1.14.jar!/:6.1.14]
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116) ~[spring-web-6.1.14.jar!/:6.1.14]
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:164) ~[tomcat-embed-core-10.1.31.jar!/:na]
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:140) ~[tomcat-embed-core-10.1.31.jar!/:na]
+	at org.springframework.web.filter.FormContentFilter.doFilterInternal(FormContentFilter.java:93) ~[spring-web-6.1.14.jar!/:6.1.14]
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116) ~[spring-web-6.1.14.jar!/:6.1.14]
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:164) ~[tomcat-embed-core-10.1.31.jar!/:na]
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:140) ~[tomcat-embed-core-10.1.31.jar!/:na]
+	at org.springframework.web.filter.CharacterEncodingFilter.doFilterInternal(CharacterEncodingFilter.java:201) ~[spring-web-6.1.14.jar!/:6.1.14]
+	at org.springframework.web.filter.OncePerRequestFilter.doFilter(OncePerRequestFilter.java:116) ~[spring-web-6.1.14.jar!/:6.1.14]
+	at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:164) ~[tomcat-embed-core-10.1.31.jar!/:na]
+	at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:140) ~[tomcat-embed-core-10.1.31.jar!/:na]
+	at org.apache.catalina.core.StandardWrapperValve.invoke(StandardWrapperValve.java:167) ~[tomcat-embed-core-10.1.31.jar!/:na]
+	at org.apache.catalina.core.StandardContextValve.invoke(StandardContextValve.java:90) ~[tomcat-embed-core-10.1.31.jar!/:na]
+	at org.apache.catalina.authenticator.AuthenticatorBase.invoke(AuthenticatorBase.java:483) ~[tomcat-embed-core-10.1.31.jar!/:na]
+	at org.apache.catalina.core.StandardHostValve.invoke(StandardHostValve.java:115) ~[tomcat-embed-core-10.1.31.jar!/:na]
+	at org.apache.catalina.valves.ErrorReportValve.invoke(ErrorReportValve.java:93) ~[tomcat-embed-core-10.1.31.jar!/:na]
+	at org.apache.catalina.core.StandardEngineValve.invoke(StandardEngineValve.java:74) ~[tomcat-embed-core-10.1.31.jar!/:na]
+	at org.apache.catalina.connector.CoyoteAdapter.service(CoyoteAdapter.java:344) ~[tomcat-embed-core-10.1.31.jar!/:na]
+	at org.apache.coyote.http11.Http11Processor.service(Http11Processor.java:384) ~[tomcat-embed-core-10.1.31.jar!/:na]
+	at org.apache.coyote.AbstractProcessorLight.process(AbstractProcessorLight.java:63) ~[tomcat-embed-core-10.1.31.jar!/:na]
+	at org.apache.coyote.AbstractProtocol$ConnectionHandler.process(AbstractProtocol.java:905) ~[tomcat-embed-core-10.1.31.jar!/:na]
+	at org.apache.tomcat.util.net.NioEndpoint$SocketProcessor.doRun(NioEndpoint.java:1741) ~[tomcat-embed-core-10.1.31.jar!/:na]
+	at org.apache.tomcat.util.net.SocketProcessorBase.run(SocketProcessorBase.java:52) ~[tomcat-embed-core-10.1.31.jar!/:na]
+	at org.apache.tomcat.util.threads.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1190) ~[tomcat-embed-core-10.1.31.jar!/:na]
+	at org.apache.tomcat.util.threads.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:659) ~[tomcat-embed-core-10.1.31.jar!/:na]
+	at org.apache.tomcat.util.threads.TaskThread$WrappingRunnable.run(TaskThread.java:63) ~[tomcat-embed-core-10.1.31.jar!/:na]
+	at java.base/java.lang.Thread.run(Thread.java:1583) ~[na:na]
+
+2026-06-24T00:16:26.005+08:00  INFO [trace_id:] 97191 --- [           main] com.zaxxer.hikari.pool.HikariPool        : scheduler-hikari - Added connection com.mysql.cj.jdbc.ConnectionImpl@5423a17
+2026-06-24T00:16:26.006+08:00  INFO [trace_id:] 97191 --- [           main] com.zaxxer.hikari.HikariDataSource       : scheduler-hikari - Start completed.
+2026-06-24T00:16:26.078+08:00  INFO [trace_id:] 97191 --- [io-18119-exec-3] o.d.s.c.service.DefaultSchedulerClient   : submit task request accepted, taskNo=t-13776b38f2d84f7db8e0c0f289c74135, group=codex_single_normal_real, user=codex-single-normal-user, bizType=demo.biz.process, priority=0, executeAt=2026-06-24T00:16:26, maxRetry=0, dependencyTaskIds=[]
+2026-06-24T00:16:26.129+08:00  INFO [trace_id:] 97191 --- [io-18119-exec-4] o.d.s.c.service.DefaultSchedulerClient   : submit task request accepted, taskNo=t-e033077e260b4ec5a4532556e4335621, group=codex_single_wait_hold_real, user=codex-single-wait_hold-user, bizType=demo.biz.process, priority=0, executeAt=2026-06-24T00:16:26, maxRetry=0, dependencyTaskIds=[]
+2026-06-24T00:16:26.240+08:00  INFO [trace_id:] 97191 --- [           main] o.d.s.a.DefaultGroupInitializer          : default scheduler group ensured, groupCode=public-group
+2026-06-24T00:16:26.919+08:00  INFO [trace_id:] 97191 --- [io-18119-exec-3] o.d.s.c.service.DefaultSchedulerClient   : task submitted, taskId=13676, taskNo=t-13776b38f2d84f7db8e0c0f289c74135, status=RUNNABLE, executeAt=2026-06-24T00:16:26
+2026-06-24T00:16:27.161+08:00  INFO [trace_id:] 97191 --- [io-18119-exec-4] o.d.s.c.service.DefaultSchedulerClient   : task submitted, taskId=13677, taskNo=t-e033077e260b4ec5a4532556e4335621, status=RUNNABLE, executeAt=2026-06-24T00:16:26
+2026-06-24T00:16:34.796+08:00  INFO [trace_id:33d67c0e-3cc9-4a1a-bbf4-9c59dda23c68] 97191 --- [   scheduling-1] o.d.s.core.service.WorkerService         : task submitted to worker pool, taskId=13676, taskNo=t-13776b38f2d84f7db8e0c0f289c74135, executeNo=1351ebe2cbb34a58a182cf4703a6b4e5, group=codex_single_normal_real, user=codex-single-normal-user
+2026-06-24T00:16:34.798+08:00  INFO [trace_id:5934818b-61ad-4411-a8a9-7469983fe85e] 97191 --- [ sched-worker-1] o.d.s.core.service.WorkerService         : worker run start, taskId=13676, taskNo=t-13776b38f2d84f7db8e0c0f289c74135, executeNo=1351ebe2cbb34a58a182cf4703a6b4e5, bizType=demo.biz.process, retryCount=0/0
+2026-06-24T00:16:35.351+08:00  INFO [trace_id:5934818b-61ad-4411-a8a9-7469983fe85e] 97191 --- [ sched-worker-1] org.dong.demo.service.DemoTaskHandler    : task success, taskId=13676, bizKey=codex-single-normal-48dbcaf1-biz, extInfo={"failBeforeSuccess":0,"waitHoldRoundsBeforeSuccess":0,"sleepMs":300,"phase":"SUCCESS"}
+2026-06-24T00:16:35.793+08:00  INFO [trace_id:5934818b-61ad-4411-a8a9-7469983fe85e] 97191 --- [ sched-worker-1] o.d.s.core.service.WorkerService         : task execute success, taskId=13676, taskNo=t-13776b38f2d84f7db8e0c0f289c74135, executeNo=1351ebe2cbb34a58a182cf4703a6b4e5
+2026-06-24T00:16:35.909+08:00  INFO [trace_id:5934818b-61ad-4411-a8a9-7469983fe85e] 97191 --- [ sched-worker-1] o.d.s.core.service.WorkerService         : worker run end, taskId=13676, taskNo=t-13776b38f2d84f7db8e0c0f289c74135, executeNo=1351ebe2cbb34a58a182cf4703a6b4e5, finalStatus=SUCCESS, errorCode=null, costMs=1112
+2026-06-24T00:16:35.940+08:00  INFO [trace_id:33d67c0e-3cc9-4a1a-bbf4-9c59dda23c68] 97191 --- [   scheduling-1] o.d.s.core.service.WorkerService         : task submitted to worker pool, taskId=13677, taskNo=t-e033077e260b4ec5a4532556e4335621, executeNo=01817102525e482caa40169fdf035ca2, group=codex_single_wait_hold_real, user=codex-single-wait_hold-user
+2026-06-24T00:16:35.941+08:00  INFO [trace_id:cd52d0c3-dddd-4714-80e2-17fd018230a5] 97191 --- [ sched-worker-2] o.d.s.core.service.WorkerService         : worker run start, taskId=13677, taskNo=t-e033077e260b4ec5a4532556e4335621, executeNo=01817102525e482caa40169fdf035ca2, bizType=demo.biz.process, retryCount=0/0
+2026-06-24T00:16:36.089+08:00  INFO [trace_id:cd52d0c3-dddd-4714-80e2-17fd018230a5] 97191 --- [ sched-worker-2] org.dong.demo.service.DemoTaskHandler    : task wait hold, taskId=13677, bizKey=codex-single-wait_hold-a474bd29-biz, holdRound=1/1
+2026-06-24T00:16:36.232+08:00  INFO [trace_id:cd52d0c3-dddd-4714-80e2-17fd018230a5] 97191 --- [ sched-worker-2] o.d.s.core.service.WorkerService         : task enter wait hold, taskId=13677, taskNo=t-e033077e260b4ec5a4532556e4335621, executeNo=01817102525e482caa40169fdf035ca2, nextExecuteAt=2026-06-24T00:16:38.140956, holdRoundCount=1/5
+2026-06-24T00:16:36.321+08:00  INFO [trace_id:cd52d0c3-dddd-4714-80e2-17fd018230a5] 97191 --- [ sched-worker-2] o.d.s.core.service.WorkerService         : worker run end, taskId=13677, taskNo=t-e033077e260b4ec5a4532556e4335621, executeNo=01817102525e482caa40169fdf035ca2, finalStatus=WAIT_HOLD, errorCode=null, costMs=380
+2026-06-24T00:16:41.059+08:00  INFO [trace_id:6ba9ff9b-a26a-4881-a667-cc6904fb539b] 97191 --- [   scheduling-1] o.d.s.core.service.RecoveryService       : queue refill task added to ready queue, taskId=13677, taskNo=t-e033077e260b4ec5a4532556e4335621, group=codex_single_wait_hold_real, user=codex-single-wait_hold-user, bizType=demo.biz.process, bizKey=codex-single-wait_hold-a474bd29-biz, executeAt=2026-06-24T00:16:38, priority=0, status=WAIT_HOLD
+2026-06-24T00:16:41.136+08:00  INFO [trace_id:6ba9ff9b-a26a-4881-a667-cc6904fb539b] 97191 --- [   scheduling-1] o.d.s.core.service.RecoveryService       : queue refill done, scanned=1, runnableScanned=1, pendingScanned=0, refillTime=0, refillReady=1
+2026-06-24T00:16:41.179+08:00  INFO [trace_id:6ba9ff9b-a26a-4881-a667-cc6904fb539b] 97191 --- [   scheduling-1] o.dong.scheduler.core.job.SchedulerJobs  : scheduler refill job end, refilled=1, costMs=689
+2026-06-24T00:16:45.729+08:00  INFO [trace_id:7d93fb4a-2f94-4961-96e1-3491093538ac] 97191 --- [   scheduling-1] o.d.s.core.service.WorkerService         : task submitted to worker pool, taskId=13677, taskNo=t-e033077e260b4ec5a4532556e4335621, executeNo=7239050f8f934980a2de2e8892755add, group=codex_single_wait_hold_real, user=codex-single-wait_hold-user
+2026-06-24T00:16:45.746+08:00  INFO [trace_id:ad96513b-843b-4840-8d49-797665db5f29] 97191 --- [ sched-worker-3] o.d.s.core.service.WorkerService         : worker run start, taskId=13677, taskNo=t-e033077e260b4ec5a4532556e4335621, executeNo=7239050f8f934980a2de2e8892755add, bizType=demo.biz.process, retryCount=0/0
+2026-06-24T00:16:46.300+08:00  INFO [trace_id:ad96513b-843b-4840-8d49-797665db5f29] 97191 --- [ sched-worker-3] org.dong.demo.service.DemoTaskHandler    : task success, taskId=13677, bizKey=codex-single-wait_hold-a474bd29-biz, extInfo={"failBeforeSuccess":0,"waitHoldRoundsBeforeSuccess":1,"sleepMs":300,"phase":"SUCCESS","observedHoldRound":1}
+2026-06-24T00:16:46.689+08:00  INFO [trace_id:ad96513b-843b-4840-8d49-797665db5f29] 97191 --- [ sched-worker-3] o.d.s.core.service.WorkerService         : task execute success, taskId=13677, taskNo=t-e033077e260b4ec5a4532556e4335621, executeNo=7239050f8f934980a2de2e8892755add
+2026-06-24T00:16:46.795+08:00  INFO [trace_id:ad96513b-843b-4840-8d49-797665db5f29] 97191 --- [ sched-worker-3] o.d.s.core.service.WorkerService         : worker run end, taskId=13677, taskNo=t-e033077e260b4ec5a4532556e4335621, executeNo=7239050f8f934980a2de2e8892755add, finalStatus=SUCCESS, errorCode=null, costMs=1049
+2026-06-24T00:16:50.514+08:00  INFO [trace_id:] 97191 --- [ionShutdownHook] com.zaxxer.hikari.HikariDataSource       : scheduler-hikari - Shutdown initiated...
+2026-06-24T00:16:50.529+08:00  INFO [trace_id:] 97191 --- [ionShutdownHook] com.zaxxer.hikari.HikariDataSource       : scheduler-hikari - Shutdown completed.
