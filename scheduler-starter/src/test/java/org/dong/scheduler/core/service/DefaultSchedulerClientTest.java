@@ -2,6 +2,8 @@ package org.dong.scheduler.core.service;
 
 import org.dong.scheduler.config.SchedulerProperties;
 import org.dong.scheduler.core.enums.DependencyTargetState;
+import org.dong.scheduler.core.enums.SchedulerErrorCode;
+import org.dong.scheduler.core.exception.SchedulerException;
 import org.dong.scheduler.core.model.GroupConfig;
 import org.dong.scheduler.core.model.SchedulerTask;
 import org.dong.scheduler.core.model.TaskDependencyRequest;
@@ -101,6 +103,42 @@ class DefaultSchedulerClientTest {
     }
 
     @Test
+    void shouldTreatWaitHoldAsSuccessfulFirstRoundForExecuteSync() {
+        TaskSubmitRequest request = new TaskSubmitRequest()
+                .setUserId("u1")
+                .setBizType("demo.biz")
+                .setBizKey("biz-sync-hold")
+                .setExecuteAt(LocalDateTime.now())
+                .setHoldMaxRounds(5)
+                .setHoldRetryDelaySec(3);
+        GroupConfig groupConfig = new GroupConfig();
+        groupConfig.setGroupCode("default-group");
+        groupConfig.setMaxConcurrency(10);
+        groupConfig.setUserBaseConcurrency(2);
+        SchedulerTask runningTask = new SchedulerTask();
+        runningTask.setId(102L);
+        runningTask.setTaskNo("task-102");
+        runningTask.setGroupCode("default-group");
+        runningTask.setUserId("u1");
+        runningTask.setBizType("demo.biz");
+        SchedulerTask waitHoldTask = new SchedulerTask();
+        waitHoldTask.setId(102L);
+        waitHoldTask.setTaskNo("task-102");
+        waitHoldTask.setStatus(org.dong.scheduler.core.enums.TaskStatus.WAIT_HOLD);
+        when(groupConfigRepository.findEnabledByGroupCode("default-group")).thenReturn(Optional.of(groupConfig));
+        when(concurrencyGuard.groupRunning("default-group")).thenReturn(0L);
+        when(dynamicUserLimitService.calculate(groupConfig, 0L)).thenReturn(2);
+        when(taskStateService.submitDirect(anyString(), any(TaskSubmitRequest.class), eq(groupConfig), eq(2),
+                eq("ins-test"), anyString(), anyString())).thenReturn(102L);
+        when(taskRepository.findById(102L)).thenReturn(Optional.of(runningTask), Optional.of(waitHoldTask));
+
+        long taskId = schedulerClient.executeSync(request);
+
+        assertEquals(102L, taskId);
+        verify(workerService).executeDirect(eq(runningTask), eq(groupConfig), anyString());
+    }
+
+    @Test
     void shouldDefaultDispatchRouteFromLocalServiceConfig() {
         TaskSubmitRequest request = new TaskSubmitRequest()
                 .setUserId("u1")
@@ -166,10 +204,14 @@ class DefaultSchedulerClientTest {
         when(dynamicUserLimitService.calculate(groupConfig, 0L)).thenReturn(2);
         when(taskStateService.submitDirect(anyString(), any(TaskSubmitRequest.class), eq(groupConfig), eq(2),
                 eq("ins-test"), anyString(), anyString()))
-                .thenThrow(new IllegalStateException("sync task is throttled by concurrency limit"));
+                .thenThrow(SchedulerException.concurrencyLimit("sync task is throttled by concurrency limit"));
 
-        IllegalStateException ex = assertThrows(IllegalStateException.class, () -> schedulerClient.executeSync(request));
+        SchedulerException ex = assertThrows(
+                SchedulerException.class,
+                () -> schedulerClient.executeSync(request)
+        );
 
+        assertEquals(SchedulerErrorCode.CONCURRENCY_LIMIT.getCode(), ex.getErrorCode());
         assertEquals("sync task is throttled by concurrency limit", ex.getMessage());
     }
 

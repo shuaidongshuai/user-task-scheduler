@@ -106,13 +106,19 @@ public class DefaultSchedulerClient implements SchedulerClient {
         workerService.executeDirect(task, groupConfig, executeNo);
         SchedulerTask finishedTask = taskRepository.findById(id)
                 .orElseThrow(() -> new IllegalStateException("task not found after sync execute: " + id));
-        if (finishedTask.getStatus() != TaskStatus.SUCCESS) {
+        if (finishedTask.getStatus() != TaskStatus.SUCCESS
+                && finishedTask.getStatus() != TaskStatus.WAIT_HOLD) {
             throw new IllegalStateException("sync task finished with status=" + finishedTask.getStatus()
                     + ", taskId=" + id
                     + ", errorCode=" + finishedTask.getErrorCode()
                     + ", errorMsg=" + finishedTask.getErrorMsg());
         }
-        log.info("sync task finished successfully, taskId={}, taskNo={}", id, finishedTask.getTaskNo());
+        if (finishedTask.getStatus() == TaskStatus.WAIT_HOLD) {
+            log.info("sync task first round entered WAIT_HOLD and returned successfully, taskId={}, taskNo={}",
+                    id, finishedTask.getTaskNo());
+        } else {
+            log.info("sync task finished successfully, taskId={}, taskNo={}", id, finishedTask.getTaskNo());
+        }
         return id;
     }
 

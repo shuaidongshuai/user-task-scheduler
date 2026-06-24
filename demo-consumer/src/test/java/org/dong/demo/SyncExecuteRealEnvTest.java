@@ -1,6 +1,8 @@
 package org.dong.demo;
 
 import org.dong.scheduler.core.enums.TaskStatus;
+import org.dong.scheduler.core.enums.SchedulerErrorCode;
+import org.dong.scheduler.core.exception.SchedulerException;
 import org.dong.scheduler.core.model.GroupConfig;
 import org.dong.scheduler.core.model.SchedulerTask;
 import org.dong.scheduler.core.model.TaskSubmitRequest;
@@ -122,15 +124,19 @@ class SyncExecuteRealEnvTest {
         assertEquals(1L, groupRunning(GROUP_LIMIT_GROUP));
 
         String syncBizKey = nextBizKey("group-sync");
-        IllegalStateException ex = assertThrows(IllegalStateException.class, () -> schedulerClient.executeSync(new TaskSubmitRequest()
-                .setGroupCode(GROUP_LIMIT_GROUP)
-                .setUserId("sync-user")
-                .setBizType(BIZ_TYPE)
-                .setBizKey(syncBizKey)
-                .setPriority(60)
-                .setExecuteAt(LocalDateTime.now().minusSeconds(1))
-                .setExecuteTimeoutSec(10)));
+        SchedulerException ex = assertThrows(
+                SchedulerException.class,
+                () -> schedulerClient.executeSync(new TaskSubmitRequest()
+                        .setGroupCode(GROUP_LIMIT_GROUP)
+                        .setUserId("sync-user")
+                        .setBizType(BIZ_TYPE)
+                        .setBizKey(syncBizKey)
+                        .setPriority(60)
+                        .setExecuteAt(LocalDateTime.now().minusSeconds(1))
+                        .setExecuteTimeoutSec(10))
+        );
 
+        assertEquals(SchedulerErrorCode.CONCURRENCY_LIMIT.getCode(), ex.getErrorCode());
         assertEquals("sync task is throttled by concurrency limit", ex.getMessage());
         assertEquals(0, taskCountByBizKey(syncBizKey));
 
@@ -161,15 +167,19 @@ class SyncExecuteRealEnvTest {
         assertEquals(1L, userRunning(USER_LIMIT_GROUP, "shared-user"));
 
         String throttledBizKey = nextBizKey("user-sync-same");
-        IllegalStateException ex = assertThrows(IllegalStateException.class, () -> schedulerClient.executeSync(new TaskSubmitRequest()
-                .setGroupCode(USER_LIMIT_GROUP)
-                .setUserId("shared-user")
-                .setBizType(BIZ_TYPE)
-                .setBizKey(throttledBizKey)
-                .setPriority(60)
-                .setExecuteAt(LocalDateTime.now().minusSeconds(1))
-                .setExecuteTimeoutSec(10)));
+        SchedulerException ex = assertThrows(
+                SchedulerException.class,
+                () -> schedulerClient.executeSync(new TaskSubmitRequest()
+                        .setGroupCode(USER_LIMIT_GROUP)
+                        .setUserId("shared-user")
+                        .setBizType(BIZ_TYPE)
+                        .setBizKey(throttledBizKey)
+                        .setPriority(60)
+                        .setExecuteAt(LocalDateTime.now().minusSeconds(1))
+                        .setExecuteTimeoutSec(10))
+        );
 
+        assertEquals(SchedulerErrorCode.CONCURRENCY_LIMIT.getCode(), ex.getErrorCode());
         assertEquals("sync task is throttled by concurrency limit", ex.getMessage());
         assertEquals(0, taskCountByBizKey(throttledBizKey));
 

@@ -1,7 +1,10 @@
 package org.dong.scheduler.core.service;
 
 import org.dong.scheduler.core.enums.DependencyTargetState;
+import org.dong.scheduler.core.enums.SchedulerErrorCode;
 import org.dong.scheduler.core.enums.TaskStatus;
+import org.dong.scheduler.core.exception.SchedulerException;
+import org.dong.scheduler.core.model.GroupConfig;
 import org.dong.scheduler.core.model.SchedulerTask;
 import org.dong.scheduler.core.model.TaskDependencyRequest;
 import org.dong.scheduler.core.model.TaskSubmitRequest;
@@ -26,6 +29,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -118,6 +122,34 @@ class TaskStateServiceTest {
         assertEquals(110L, taskId);
         verify(queueRedisService).enqueueReady(persistedTask);
         verify(queueRedisService, never()).enqueue(persistedTask);
+    }
+
+    @Test
+    void shouldThrowDedicatedExceptionWhenSyncSubmitHitsConcurrencyLimit() {
+        TaskSubmitRequest request = new TaskSubmitRequest()
+                .setGroupCode("g1")
+                .setUserId("u1")
+                .setBizType("demo.biz")
+                .setBizKey("biz-sync")
+                .setExecuteAt(LocalDateTime.now().minusSeconds(1));
+        GroupConfig groupConfig = new GroupConfig();
+        groupConfig.setGroupCode("g1");
+        groupConfig.setMaxConcurrency(10);
+        groupConfig.setLockExpireSec(30);
+
+        when(taskRepository.insert(eq("task-sync"), eq(request), eq(request.getExtInfo()), eq(TaskStatus.RUNNABLE)))
+                .thenReturn(120L);
+        when(concurrencyGuard.tryAcquire(eq("g1"), eq("u1"), eq(120L), eq(10), eq(2), anyInt(), eq("exec-1")))
+                .thenReturn(false);
+
+        SchedulerException ex = assertThrows(
+                SchedulerException.class,
+                () -> taskStateService.submitDirect("task-sync", request, groupConfig, 2, "ins-test", "main", "exec-1")
+        );
+
+        assertEquals(SchedulerErrorCode.CONCURRENCY_LIMIT.getCode(), ex.getErrorCode());
+        assertEquals(SchedulerErrorCode.CONCURRENCY_LIMIT.getMessage(), ex.getMessage());
+        verify(concurrencyGuard, never()).release("g1", "u1", 120L, "exec-1");
     }
 
     @Test

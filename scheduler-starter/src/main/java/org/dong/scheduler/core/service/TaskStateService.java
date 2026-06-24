@@ -1,6 +1,7 @@
 package org.dong.scheduler.core.service;
 
 import org.dong.scheduler.core.enums.TaskStatus;
+import org.dong.scheduler.core.exception.SchedulerException;
 import org.dong.scheduler.core.model.SchedulerTask;
 import org.dong.scheduler.core.model.TaskSubmitRequest;
 import org.dong.scheduler.core.model.TaskDependencyRequest;
@@ -94,7 +95,7 @@ public class TaskStateService {
                         executeNo
                 );
                 if (!acquired) {
-                    throw new IllegalStateException("sync task is throttled by concurrency limit");
+                    throw SchedulerException.concurrencyLimit();
                 }
                 acquiredRef.set(new DirectAcquireContext(groupConfig.getGroupCode(), request.getUserId(), createdTaskId, executeNo));
                 boolean running = taskRepository.casToRunning(createdTaskId, instanceId, threadName, now);

@@ -196,7 +196,7 @@ create index idx_route_status_time on scheduler_task(dispatch_route, status, exe
 
 ### 同步执行接口
 
-`SchedulerClient#executeSync(TaskSubmitRequest)` 会直接在当前调用线程执行 `TaskHandler`，不会进入异步 ready queue/worker 调度链路，但仍然共享同一个 group/user 并发限制。
+`SchedulerClient#executeSync(TaskSubmitRequest)` 会直接在当前调用线程执行 `TaskHandler` 首轮，不会进入异步 ready queue/worker 线程池执行链路，但仍然共享同一个 group/user 并发限制。
 
 适用场景：
 
@@ -208,7 +208,18 @@ create index idx_route_status_time on scheduler_task(dispatch_route, status, exe
 - 仅支持立即执行任务：`executeAt` 需要小于等于当前时间
 - 不支持 `dependencies`
 - 同步路径按单次执行处理，不走异步重试链路
-- 若 group 或 user 并发已满，会直接抛出限流异常
+- 若 group 或 user 并发已满，会直接抛出 `SchedulerException`
+- 限流错误枚举为 `SchedulerErrorCode.CONCURRENCY_LIMIT`
+- 限流错误码为 `SchedulerErrorCode.CONCURRENCY_LIMIT.getCode()`，当前值为 `429`
+- 限流错误信息为 `SchedulerErrorCode.CONCURRENCY_LIMIT.getMessage()`
+
+返回语义：
+
+- 若首轮执行后任务状态为 `SUCCESS`，`executeSync(...)` 正常返回
+- 若首轮执行返回 `WAIT_HOLD`，也视为本次同步提交成功，`executeSync(...)` 正常返回
+- 但 `WAIT_HOLD` 场景下，返回仅表示“首轮已执行并成功进入后续轮询流程”，不表示任务整体生命周期已经结束
+- 后续轮询仍由框架按 `WAIT_HOLD` 语义继续调度，并持续占用同一路 group/user 并发
+- 若首轮执行后任务状态为 `FAILED`、`WAIT_RETRY` 等非成功态，则 `executeSync(...)` 抛异常
 
 ### 超时自动取消与链式降级
 
