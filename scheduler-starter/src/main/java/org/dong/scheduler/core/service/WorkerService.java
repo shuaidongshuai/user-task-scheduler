@@ -68,14 +68,14 @@ public class WorkerService {
     public void submit(SchedulerTask task, GroupConfig groupConfig, String executeNo) {
         log.info("task submitted to worker pool, taskId={}, taskNo={}, executeNo={}, group={}, user={}",
                 task.getId(), task.getTaskNo(), executeNo, task.getGroupCode(), task.getUserId());
-        workerExecutor.execute(ThreadContextUtil.addNewContext(() -> executeInternal(task, groupConfig, executeNo)));
+        workerExecutor.execute(ThreadContextUtil.addNewContext(() -> executeInternal(task, groupConfig, executeNo, false)));
     }
 
     public void executeDirect(SchedulerTask task, GroupConfig groupConfig, String executeNo) {
-        executeInternal(task, groupConfig, executeNo);
+        executeInternal(task, groupConfig, executeNo, true);
     }
 
-    private void executeInternal(SchedulerTask task, GroupConfig groupConfig, String executeNo) {
+    private void executeInternal(SchedulerTask task, GroupConfig groupConfig, String executeNo, boolean rethrowOnException) {
         long begin = System.currentTimeMillis();
         String instanceId = properties.getInstanceId();
         LocalDateTime now = LocalDateTime.now();
@@ -105,6 +105,7 @@ public class WorkerService {
         TaskStatus finalStatus = TaskStatus.FAILED;
         String errorCode = null;
         String errorMsg = null;
+        Exception executionException = null;
 
         try {
             BusinessTaskStateProvider stateProvider = businessTaskStateProviderRegistry.find(task.getBizType());
@@ -217,7 +218,6 @@ public class WorkerService {
                         task.getId(), task.getTaskNo(), executeNo, errorCode, errorMsg);
             }
         } catch (Exception ex) {
-            log.error("task execute exception, taskId={}", task.getId(), ex);
             errorCode = "TASK_EXCEPTION";
             errorMsg = ex.getMessage();
             if (task.canRetry()) {
@@ -228,6 +228,11 @@ public class WorkerService {
             } else {
                 taskStateService.markFailed(task.getId(), errorCode, errorMsg, LocalDateTime.now());
                 finalStatus = TaskStatus.FAILED;
+            }
+            if (rethrowOnException) {
+                executionException = ex;
+            } else {
+                log.error("task execute exception, taskId={}", task.getId(), ex);
             }
         } finally {
             heartbeat.cancel(true);
@@ -247,6 +252,14 @@ public class WorkerService {
             long cost = System.currentTimeMillis() - begin;
             log.info("worker run end, taskId={}, taskNo={}, executeNo={}, finalStatus={}, errorCode={}, costMs={}",
                     task.getId(), task.getTaskNo(), executeNo, finalStatus, errorCode, cost);
+        }
+        if (executionException != null) {
+            if (executionException instanceof RuntimeException runtimeException) {
+                throw runtimeException;
+            }
+            throw new IllegalStateException("sync task execute failed, taskId=" + task.getId()
+                    + ", errorCode=" + errorCode
+                    + ", errorMsg=" + errorMsg, executionException);
         }
     }
 

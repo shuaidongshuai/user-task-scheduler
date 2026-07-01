@@ -18,6 +18,9 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import java.time.LocalDateTime;
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -222,5 +225,68 @@ class WorkerServiceReleaseMismatchTest {
         verify(concurrencyGuard).releaseLease(1L, "exec-hold");
         verify(taskRepository).finishExecution(eq("exec-hold"), eq(org.dong.scheduler.core.enums.TaskStatus.WAIT_HOLD),
                 any(), any(), any(LocalDateTime.class));
+    }
+
+    @Test
+    void shouldRethrowHandlerExceptionForDirectExecutionAfterSchedulingRetry() throws Exception {
+        SchedulerProperties properties = new SchedulerProperties();
+        properties.setInstanceId("ins-test");
+        properties.setWorkerThreads(2);
+        properties.setHeartbeatIntervalSec(60);
+        properties.setDefaultExecuteTimeoutSec(5);
+        properties.setDefaultRetryDelaySec(30);
+
+        workerExecutor = new ThreadPoolTaskExecutor();
+        workerExecutor.setCorePoolSize(1);
+        workerExecutor.setMaxPoolSize(1);
+        workerExecutor.setQueueCapacity(8);
+        workerExecutor.initialize();
+
+        Exception handlerFailure = new Exception("boom");
+        SchedulerTask reloadedTask = new SchedulerTask();
+        reloadedTask.setId(1L);
+        when(taskHandler.bizTypes()).thenReturn(List.of("demo.biz"));
+        when(taskHandler.execute(any(SchedulerTask.class))).thenThrow(handlerFailure);
+        when(taskRepository.findById(1L)).thenReturn(java.util.Optional.of(reloadedTask));
+        when(concurrencyGuard.release("g1", "u1", 1L, "exec-throw")).thenReturn(true);
+
+        TaskHandlerRegistry registry = new TaskHandlerRegistry(List.of(taskHandler));
+        BusinessTaskStateProviderRegistry stateProviderRegistry = new BusinessTaskStateProviderRegistry(List.of());
+        workerService = new WorkerService(
+                properties,
+                taskRepository,
+                registry,
+                concurrencyGuard,
+                queueRedisService,
+                recoveryService,
+                workerExecutor,
+                stateProviderRegistry,
+                taskStateService
+        );
+
+        SchedulerTask task = new SchedulerTask();
+        task.setId(1L);
+        task.setTaskNo("task-1");
+        task.setGroupCode("g1");
+        task.setUserId("u1");
+        task.setBizType("demo.biz");
+        task.setExecuteAt(LocalDateTime.now());
+        task.setMaxRetryCount(3);
+        task.setRetryCount(0);
+
+        GroupConfig cfg = new GroupConfig();
+        cfg.setLockExpireSec(30);
+
+        IllegalStateException ex = assertThrows(IllegalStateException.class,
+                () -> workerService.executeDirect(task, cfg, "exec-throw"));
+
+        assertEquals("sync task execute failed, taskId=1, errorCode=TASK_EXCEPTION, errorMsg=boom", ex.getMessage());
+        assertNotNull(ex.getCause());
+        assertEquals("boom", ex.getCause().getMessage());
+        verify(taskRepository).markWaitRetry(eq(1L), any(LocalDateTime.class),
+                eq("TASK_EXCEPTION"), eq("boom"), any(LocalDateTime.class));
+        verify(queueRedisService).enqueue(reloadedTask);
+        verify(taskRepository).finishExecution(eq("exec-throw"), eq(org.dong.scheduler.core.enums.TaskStatus.WAIT_RETRY),
+                eq("TASK_EXCEPTION"), eq("boom"), any(LocalDateTime.class));
     }
 }
