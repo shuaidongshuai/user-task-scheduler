@@ -14,13 +14,16 @@ public interface TaskRepository {
 
     Optional<SchedulerTask> findById(Long id);
 
+    Optional<SchedulerTask> findByIdForUpdate(Long id);
+
     Map<Long, SchedulerTask> findByIds(List<Long> ids);
 
     Optional<SchedulerTask> findByTaskNo(String taskNo);
 
     List<Long> findExistingTaskIds(List<Long> taskIds);
 
-    boolean casToRunning(Long id, String instanceId, String threadName, LocalDateTime now);
+    boolean casToRunning(Long id, String expectedGroupCode, int expectedVersion,
+                         String instanceId, String threadName, LocalDateTime now);
 
     boolean casWaitHoldToRunning(Long id, String instanceId, String threadName, LocalDateTime now);
 
@@ -28,11 +31,14 @@ public interface TaskRepository {
 
     boolean markFailed(Long id, String errorCode, String errorMsg, LocalDateTime now);
 
-    boolean markFailedByWaitDeadline(Long id, String errorCode, String errorMsg, LocalDateTime now);
+    boolean markFailedByWaitDeadline(SchedulerTask snapshot, String errorCode, String errorMsg, LocalDateTime now);
 
     boolean markFailedPendingByDependency(Long id, String errorCode, String errorMsg, LocalDateTime now);
 
     boolean markWaitRetry(Long id, LocalDateTime nextRetryAt, String errorCode, String errorMsg, LocalDateTime now);
+
+    boolean markWaitRetryOnGroup(Long id, LocalDateTime nextRetryAt, String errorCode, String errorMsg,
+                                 String sourceGroupCode, String targetGroupCode, LocalDateTime now);
 
     boolean markWaitHold(Long id, LocalDateTime nextExecuteAt, String extInfo, LocalDateTime now);
 
@@ -53,6 +59,20 @@ public interface TaskRepository {
     List<SchedulerTask> findPendingForTimeQueueRefill(String dispatchRoute, LocalDateTime now, int limit);
 
     List<Long> findWaitingTimeoutTaskIds(LocalDateTime now, int limit);
+
+    List<Long> findFallbackDueTaskIds(String dispatchRoute, LocalDateTime now, int limit);
+
+    boolean casRouteFallback(SchedulerTask snapshot, String targetGroupCode,
+                             LocalDateTime nextCheckAt, LocalDateTime now);
+
+    boolean casUpdateFallbackCheck(SchedulerTask snapshot, LocalDateTime nextCheckAt, LocalDateTime now,
+                                   boolean incrementPolicyCount);
+
+    boolean casFallbackWaitingToFailed(SchedulerTask snapshot, String errorCode, String errorMsg,
+                                       LocalDateTime now, boolean incrementPolicyCount);
+
+    void insertGroupFallbackLog(SchedulerTask snapshot, String targetGroupCode,
+                                LocalDateTime nextCheckAt, int fallbackCount);
 
     void promotePendingToRunnable(String dispatchRoute, LocalDateTime now, int limit);
 

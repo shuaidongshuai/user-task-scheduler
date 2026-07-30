@@ -1,5 +1,6 @@
 DROP TABLE IF EXISTS scheduler_task_execution;
 DROP TABLE IF EXISTS scheduler_task_dependency;
+DROP TABLE IF EXISTS scheduler_task_group_fallback_log;
 DROP TABLE IF EXISTS scheduler_group_config;
 DROP TABLE IF EXISTS scheduler_task;
 
@@ -27,6 +28,9 @@ CREATE TABLE IF NOT EXISTS scheduler_task (
     retry_delay_sec INT DEFAULT NULL COMMENT '单任务重试间隔（秒，为空则使用全局配置）',
     max_wait_sec INT DEFAULT NULL COMMENT '任务最长等待调度时间（秒，为空表示不限时）',
     wait_deadline_at DATETIME DEFAULT NULL COMMENT '等待调度超时截止时间，为空表示不限时',
+    fallback_check_at DATETIME DEFAULT NULL COMMENT '下次调用等待降级策略的绝对时间',
+    fallback_policy_count INT NOT NULL DEFAULT 0 COMMENT '降级策略成功落库次数',
+    group_fallback_count INT NOT NULL DEFAULT 0 COMMENT '实际切换Group次数',
 
     dispatcher_instance VARCHAR(128) DEFAULT NULL COMMENT '调度实例标识',
     worker_instance VARCHAR(128) DEFAULT NULL COMMENT '执行实例标识',
@@ -50,10 +54,26 @@ CREATE TABLE IF NOT EXISTS scheduler_task (
     INDEX idx_route_status_time (dispatch_route, status, execute_at),
     INDEX idx_status_time (status, execute_at),
     INDEX idx_status_wait_deadline (status, wait_deadline_at),
+    INDEX idx_route_status_fallback (dispatch_route, status, fallback_check_at, id),
     INDEX idx_user_group_status (user_id, group_code, status),
     INDEX idx_heartbeat (status, heartbeat_time),
     INDEX idx_biz_type_biz_key (biz_type, biz_key)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='调度任务主表';
+
+CREATE TABLE IF NOT EXISTS scheduler_task_group_fallback_log (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键ID',
+    task_id BIGINT NOT NULL COMMENT '调度任务ID',
+    task_no VARCHAR(64) NOT NULL COMMENT '任务唯一号',
+    source_group_code VARCHAR(64) NOT NULL COMMENT '切组前Group',
+    target_group_code VARCHAR(64) NOT NULL COMMENT '切组后Group',
+    previous_fallback_check_at DATETIME NOT NULL COMMENT '本次触发时间',
+    next_fallback_check_at DATETIME DEFAULT NULL COMMENT '下次检查时间',
+    task_status VARCHAR(32) NOT NULL COMMENT '切组时任务状态',
+    fallback_count INT NOT NULL COMMENT '累计实际切组次数',
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    INDEX idx_task_time (task_id, create_time),
+    INDEX idx_source_target_time (source_group_code, target_group_code, create_time)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='非运行任务Group切换审计日志';
 
 CREATE TABLE IF NOT EXISTS scheduler_task_dependency (
     id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键ID',

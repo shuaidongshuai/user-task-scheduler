@@ -81,6 +81,10 @@ public class BatchSubmitTaskRequest {
      */
     private Integer maxWaitSec;
     /**
+     * 首次调用等待降级策略的绝对时间；为空表示不启用。
+     */
+    private LocalDateTime fallbackCheckAt;
+    /**
      * 扩展信息（字符串），可选。
      */
     private String extInfo;

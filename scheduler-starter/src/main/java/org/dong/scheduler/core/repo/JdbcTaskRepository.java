@@ -34,9 +34,9 @@ public class JdbcTaskRepository implements TaskRepository {
                         task_no, group_code, dispatch_route, user_id, biz_type, biz_key,
                         status, priority, execute_at, next_retry_at,
                         retry_count, max_retry_count, hold_round_count, hold_max_rounds, hold_retry_delay_sec,
-                        execute_timeout_sec, retry_delay_sec, max_wait_sec, wait_deadline_at,
-                        version, ext_info, create_time, update_time
-                    ) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,now(),now())
+                        execute_timeout_sec, retry_delay_sec, max_wait_sec, wait_deadline_at, fallback_check_at,
+                        fallback_policy_count, group_fallback_count, version, ext_info, create_time, update_time
+                    ) values(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,now(),now())
                     """, Statement.RETURN_GENERATED_KEYS);
             ps.setString(1, taskNo);
             ps.setString(2, request.getGroupCode());
@@ -77,8 +77,11 @@ public class JdbcTaskRepository implements TaskRepository {
             } else {
                 ps.setTimestamp(19, Timestamp.valueOf(request.getWaitDeadlineAt()));
             }
-            ps.setInt(20, 0);
-            ps.setString(21, extInfo);
+            ps.setTimestamp(20, timestamp(request.getFallbackCheckAt()));
+            ps.setInt(21, 0);
+            ps.setInt(22, 0);
+            ps.setInt(23, 0);
+            ps.setString(24, extInfo);
             return ps;
         }, keyHolder);
         return Objects.requireNonNull(keyHolder.getKey()).longValue();
@@ -87,6 +90,13 @@ public class JdbcTaskRepository implements TaskRepository {
     @Override
     public Optional<SchedulerTask> findById(Long id) {
         List<SchedulerTask> list = jdbcTemplate.query("select * from scheduler_task where id = ?", this::mapTask, id);
+        return list.stream().findFirst();
+    }
+
+    @Override
+    public Optional<SchedulerTask> findByIdForUpdate(Long id) {
+        List<SchedulerTask> list = jdbcTemplate.query(
+                "select * from scheduler_task where id = ? for update", this::mapTask, id);
         return list.stream().findFirst();
     }
 
@@ -124,13 +134,15 @@ public class JdbcTaskRepository implements TaskRepository {
     }
 
     @Override
-    public boolean casToRunning(Long id, String instanceId, String threadName, LocalDateTime now) {
+    public boolean casToRunning(Long id, String expectedGroupCode, int expectedVersion,
+                                String instanceId, String threadName, LocalDateTime now) {
         int updated = jdbcTemplate.update("""
                 update scheduler_task
                    set status='RUNNING', dispatcher_instance=?, worker_instance=?, worker_thread=?,
                        start_time=?, heartbeat_time=?, update_time=now(), version=version+1
-                 where id=? and status in ('RUNNABLE','WAIT_RETRY')
-                """, instanceId, instanceId, threadName, Timestamp.valueOf(now), Timestamp.valueOf(now), id);
+                 where id=? and status in ('RUNNABLE','WAIT_RETRY') and group_code=? and version=?
+                """, instanceId, instanceId, threadName, Timestamp.valueOf(now), Timestamp.valueOf(now),
+                id, expectedGroupCode, expectedVersion);
         return updated > 0;
     }
 
@@ -149,7 +161,7 @@ public class JdbcTaskRepository implements TaskRepository {
     public boolean markSuccess(Long id, LocalDateTime now) {
         return jdbcTemplate.update("""
                 update scheduler_task
-                   set status='SUCCESS', finish_time=?, update_time=now(), version=version+1
+                   set status='SUCCESS', finish_time=?, fallback_check_at=null, update_time=now(), version=version+1
                  where id=? and status='RUNNING'
                 """, Timestamp.valueOf(now), id) > 0;
     }
@@ -158,26 +170,32 @@ public class JdbcTaskRepository implements TaskRepository {
     public boolean markFailed(Long id, String errorCode, String errorMsg, LocalDateTime now) {
         return jdbcTemplate.update("""
                 update scheduler_task
-                   set status='FAILED', finish_time=?, error_code=?, error_msg=?, update_time=now(), version=version+1
+                   set status='FAILED', finish_time=?, error_code=?, error_msg=?, fallback_check_at=null,
+                       update_time=now(), version=version+1
                  where id=? and status in ('RUNNING','WAIT_HOLD','WAIT_RETRY','RUNNABLE')
                 """, Timestamp.valueOf(now), errorCode, errorMsg, id) > 0;
     }
 
     @Override
-    public boolean markFailedByWaitDeadline(Long id, String errorCode, String errorMsg, LocalDateTime now) {
+    public boolean markFailedByWaitDeadline(SchedulerTask snapshot, String errorCode, String errorMsg,
+                                            LocalDateTime now) {
         return jdbcTemplate.update("""
                 update scheduler_task
-                   set status='FAILED', finish_time=?, error_code=?, error_msg=?, update_time=now(), version=version+1
+                   set status='FAILED', finish_time=?, error_code=?, error_msg=?, fallback_check_at=null,
+                       update_time=now(), version=version+1
                  where id=? and status in ('PENDING','RUNNABLE','WAIT_RETRY')
+                   and status=? and version=?
                    and wait_deadline_at is not null and wait_deadline_at <= ?
-                """, Timestamp.valueOf(now), errorCode, errorMsg, id, Timestamp.valueOf(now)) > 0;
+                """, Timestamp.valueOf(now), errorCode, errorMsg, snapshot.getId(), snapshot.getStatus().name(),
+                snapshot.getVersion(), Timestamp.valueOf(now)) > 0;
     }
 
     @Override
     public boolean markFailedPendingByDependency(Long id, String errorCode, String errorMsg, LocalDateTime now) {
         return jdbcTemplate.update("""
                 update scheduler_task
-                   set status='FAILED', finish_time=?, error_code=?, error_msg=?, update_time=now(), version=version+1
+                   set status='FAILED', finish_time=?, error_code=?, error_msg=?, fallback_check_at=null,
+                       update_time=now(), version=version+1
                  where id=? and status='PENDING'
                 """, Timestamp.valueOf(now), errorCode, errorMsg, id) > 0;
     }
@@ -190,6 +208,18 @@ public class JdbcTaskRepository implements TaskRepository {
                        error_code=?, error_msg=?, update_time=now(), version=version+1
                  where id=? and status='RUNNING'
                 """, Timestamp.valueOf(nextRetryAt), Timestamp.valueOf(nextRetryAt), errorCode, errorMsg, id) > 0;
+    }
+
+    @Override
+    public boolean markWaitRetryOnGroup(Long id, LocalDateTime nextRetryAt, String errorCode, String errorMsg,
+                                        String sourceGroupCode, String targetGroupCode, LocalDateTime now) {
+        return jdbcTemplate.update("""
+                update scheduler_task
+                   set status='WAIT_RETRY', group_code=?, retry_count=retry_count+1, next_retry_at=?, execute_at=?,
+                       error_code=?, error_msg=?, update_time=now(), version=version+1
+                 where id=? and status='RUNNING' and group_code=?
+                """, targetGroupCode, Timestamp.valueOf(nextRetryAt), Timestamp.valueOf(nextRetryAt),
+                errorCode, errorMsg, id, sourceGroupCode) > 0;
     }
 
     @Override
@@ -229,7 +259,7 @@ public class JdbcTaskRepository implements TaskRepository {
     public boolean markCancelledByTaskNo(String taskNo, LocalDateTime now) {
         return jdbcTemplate.update("""
                 update scheduler_task
-                   set status='CANCELLED', finish_time=?, update_time=now(), version=version+1
+                   set status='CANCELLED', finish_time=?, fallback_check_at=null, update_time=now(), version=version+1
                  where task_no=? and status in ('PENDING','RUNNABLE','WAIT_RETRY','WAIT_HOLD')
                 """, Timestamp.valueOf(now), taskNo) > 0;
     }
@@ -305,7 +335,7 @@ public class JdbcTaskRepository implements TaskRepository {
     public List<Long> findWaitingTimeoutTaskIds(LocalDateTime now, int limit) {
         return jdbcTemplate.query("""
                 select id from scheduler_task
-                 where status in ('PENDING','RUNNABLE','WAIT_RETRY','WAIT_HOLD')
+                 where status in ('PENDING','RUNNABLE','WAIT_RETRY')
                    and wait_deadline_at is not null
                    and wait_deadline_at <= ?
                  order by wait_deadline_at asc
@@ -359,6 +389,84 @@ public class JdbcTaskRepository implements TaskRepository {
     }
 
     @Override
+    public List<Long> findFallbackDueTaskIds(String dispatchRoute, LocalDateTime now, int limit) {
+        if (dispatchRoute == null || dispatchRoute.isBlank()) {
+            return jdbcTemplate.query("""
+                    select id from scheduler_task
+                     where dispatch_route is null
+                       and status in ('PENDING','RUNNABLE','WAIT_RETRY')
+                       and fallback_check_at is not null and fallback_check_at <= ?
+                     order by fallback_check_at asc, id asc limit ?
+                    """, (rs, rowNum) -> rs.getLong(1), Timestamp.valueOf(now), limit);
+        }
+        return jdbcTemplate.query("""
+                select id from scheduler_task
+                 where dispatch_route = ?
+                   and status in ('PENDING','RUNNABLE','WAIT_RETRY')
+                   and fallback_check_at is not null and fallback_check_at <= ?
+                 order by fallback_check_at asc, id asc limit ?
+                """, (rs, rowNum) -> rs.getLong(1), dispatchRoute, Timestamp.valueOf(now), limit);
+    }
+
+    @Override
+    public boolean casRouteFallback(SchedulerTask snapshot, String targetGroupCode,
+                                    LocalDateTime nextCheckAt, LocalDateTime now) {
+        return jdbcTemplate.update("""
+                update scheduler_task
+                   set group_code=?, fallback_check_at=?, fallback_policy_count=fallback_policy_count+1,
+                       group_fallback_count=group_fallback_count+1, update_time=?, version=version+1
+                 where id=? and status in ('PENDING','RUNNABLE','WAIT_RETRY')
+                   and status=? and group_code=? and fallback_check_at=? and version=?
+                   and (wait_deadline_at is null or wait_deadline_at > ?)
+                """, targetGroupCode, timestamp(nextCheckAt), Timestamp.valueOf(now), snapshot.getId(),
+                snapshot.getStatus().name(), snapshot.getGroupCode(), timestamp(snapshot.getFallbackCheckAt()),
+                snapshot.getVersion(), Timestamp.valueOf(now)) > 0;
+    }
+
+    @Override
+    public boolean casUpdateFallbackCheck(SchedulerTask snapshot, LocalDateTime nextCheckAt, LocalDateTime now,
+                                          boolean incrementPolicyCount) {
+        String countUpdate = incrementPolicyCount
+                ? "fallback_policy_count=fallback_policy_count+1," : "";
+        return jdbcTemplate.update("update scheduler_task set fallback_check_at=?, " + countUpdate
+                        + " update_time=?, version=version+1"
+                        + " where id=? and status in ('PENDING','RUNNABLE','WAIT_RETRY')"
+                        + " and status=? and group_code=? and fallback_check_at=? and version=?"
+                        + " and (wait_deadline_at is null or wait_deadline_at > ?)",
+                timestamp(nextCheckAt), Timestamp.valueOf(now), snapshot.getId(), snapshot.getStatus().name(),
+                snapshot.getGroupCode(), timestamp(snapshot.getFallbackCheckAt()), snapshot.getVersion(),
+                Timestamp.valueOf(now)) > 0;
+    }
+
+    @Override
+    public boolean casFallbackWaitingToFailed(SchedulerTask snapshot, String errorCode, String errorMsg,
+                                              LocalDateTime now, boolean incrementPolicyCount) {
+        String countUpdate = incrementPolicyCount
+                ? "fallback_policy_count=fallback_policy_count+1," : "";
+        return jdbcTemplate.update("update scheduler_task set status='FAILED', finish_time=?, error_code=?,"
+                        + " error_msg=?, fallback_check_at=null, " + countUpdate
+                        + " update_time=?, version=version+1"
+                        + " where id=? and status in ('PENDING','RUNNABLE','WAIT_RETRY')"
+                        + " and status=? and group_code=? and fallback_check_at=? and version=?"
+                        + " and (wait_deadline_at is null or wait_deadline_at > ?)",
+                Timestamp.valueOf(now), errorCode, errorMsg, Timestamp.valueOf(now), snapshot.getId(),
+                snapshot.getStatus().name(), snapshot.getGroupCode(), timestamp(snapshot.getFallbackCheckAt()),
+                snapshot.getVersion(), Timestamp.valueOf(now)) > 0;
+    }
+
+    @Override
+    public void insertGroupFallbackLog(SchedulerTask snapshot, String targetGroupCode,
+                                       LocalDateTime nextCheckAt, int fallbackCount) {
+        jdbcTemplate.update("""
+                insert into scheduler_task_group_fallback_log(
+                    task_id, task_no, source_group_code, target_group_code,
+                    previous_fallback_check_at, next_fallback_check_at, task_status, fallback_count
+                ) values(?,?,?,?,?,?,?,?)
+                """, snapshot.getId(), snapshot.getTaskNo(), snapshot.getGroupCode(), targetGroupCode,
+                timestamp(snapshot.getFallbackCheckAt()), timestamp(nextCheckAt), snapshot.getStatus().name(), fallbackCount);
+    }
+
+    @Override
     public boolean markRunnableIfPending(Long id, LocalDateTime now) {
         return jdbcTemplate.update("""
                 update scheduler_task
@@ -376,7 +484,7 @@ public class JdbcTaskRepository implements TaskRepository {
     public boolean markTerminalByBusinessState(Long id, TaskStatus status, LocalDateTime now) {
         return jdbcTemplate.update("""
                 update scheduler_task
-                   set status=?, finish_time=?, update_time=now(), version=version+1
+                   set status=?, finish_time=?, fallback_check_at=null, update_time=now(), version=version+1
                  where id=? and status in ('RUNNABLE','WAIT_RETRY','WAIT_HOLD','RUNNING','PENDING')
                 """, status.name(), Timestamp.valueOf(now), id) > 0;
     }
@@ -457,6 +565,9 @@ public class JdbcTaskRepository implements TaskRepository {
         task.setRetryDelaySec((Integer) rs.getObject("retry_delay_sec"));
         task.setMaxWaitSec((Integer) rs.getObject("max_wait_sec"));
         task.setWaitDeadlineAt(tsToLdt(rs.getTimestamp("wait_deadline_at")));
+        task.setFallbackCheckAt(tsToLdt(rs.getTimestamp("fallback_check_at")));
+        task.setFallbackPolicyCount(rs.getInt("fallback_policy_count"));
+        task.setGroupFallbackCount(rs.getInt("group_fallback_count"));
         task.setDispatcherInstance(rs.getString("dispatcher_instance"));
         task.setWorkerInstance(rs.getString("worker_instance"));
         task.setWorkerThread(rs.getString("worker_thread"));
@@ -474,5 +585,9 @@ public class JdbcTaskRepository implements TaskRepository {
 
     private LocalDateTime tsToLdt(Timestamp ts) {
         return ts == null ? null : ts.toLocalDateTime();
+    }
+
+    private Timestamp timestamp(LocalDateTime value) {
+        return value == null ? null : Timestamp.valueOf(value);
     }
 }

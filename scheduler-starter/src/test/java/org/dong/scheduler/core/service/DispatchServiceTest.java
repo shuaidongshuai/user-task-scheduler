@@ -114,9 +114,12 @@ class DispatchServiceTest {
         when(concurrencyGuard.tryAcquire("g1", "u1", 101L, 5, 2, 60, "exec-101")).thenReturn(true);
         when(concurrencyGuard.tryAcquire("g1", "u1", 102L, 5, 2, 60, "exec-102")).thenReturn(true);
         when(concurrencyGuard.tryAcquire("g1", "u2", 201L, 5, 2, 60, "exec-201")).thenReturn(true);
-        when(taskRepository.casToRunning(eq(101L), eq(null), eq(Thread.currentThread().getName()), any(LocalDateTime.class))).thenReturn(true);
-        when(taskRepository.casToRunning(eq(102L), eq(null), eq(Thread.currentThread().getName()), any(LocalDateTime.class))).thenReturn(true);
-        when(taskRepository.casToRunning(eq(201L), eq(null), eq(Thread.currentThread().getName()), any(LocalDateTime.class))).thenReturn(true);
+        when(taskRepository.casToRunning(eq(101L), eq("g1"), eq(0), eq(null),
+                eq(Thread.currentThread().getName()), any(LocalDateTime.class))).thenReturn(true);
+        when(taskRepository.casToRunning(eq(102L), eq("g1"), eq(0), eq(null),
+                eq(Thread.currentThread().getName()), any(LocalDateTime.class))).thenReturn(true);
+        when(taskRepository.casToRunning(eq(201L), eq("g1"), eq(0), eq(null),
+                eq(Thread.currentThread().getName()), any(LocalDateTime.class))).thenReturn(true);
 
         dispatchService.dispatchOnce();
 
@@ -153,7 +156,8 @@ class DispatchServiceTest {
         when(concurrencyGuard.tryAcquire("g1", "u1", 301L, 5, 1, 60, "exec-301")).thenReturn(false);
         when(concurrencyGuard.userRunning("g1", "u1")).thenReturn(0L, 1L);
         when(concurrencyGuard.tryAcquire("g1", "u2", 401L, 5, 1, 60, "exec-401")).thenReturn(true);
-        when(taskRepository.casToRunning(eq(401L), eq(null), eq(Thread.currentThread().getName()), any(LocalDateTime.class))).thenReturn(true);
+        when(taskRepository.casToRunning(eq(401L), eq("g1"), eq(0), eq(null),
+                eq(Thread.currentThread().getName()), any(LocalDateTime.class))).thenReturn(true);
 
         dispatchService.dispatchOnce();
 
@@ -179,7 +183,8 @@ class DispatchServiceTest {
         when(dynamicUserLimitService.calculate(eq(group), anyLong())).thenReturn(2);
         when(workerService.newExecuteNo()).thenReturn("exec-501");
         when(concurrencyGuard.tryAcquire("g1", "u1", 501L, 5, 2, 60, "exec-501")).thenReturn(true);
-        when(taskRepository.casToRunning(eq(501L), eq(null), eq(Thread.currentThread().getName()), any(LocalDateTime.class))).thenReturn(true);
+        when(taskRepository.casToRunning(eq(501L), eq("g1"), eq(0), eq(null),
+                eq(Thread.currentThread().getName()), any(LocalDateTime.class))).thenReturn(true);
         doThrow(new TaskRejectedException("worker pool full")).when(workerService).submit(first, group, "exec-501");
         when(concurrencyGuard.release("g1", "u1", 501L, "exec-501")).thenReturn(true);
         when(taskRepository.rescheduleToRunnable(eq(501L), any(LocalDateTime.class),
@@ -246,6 +251,30 @@ class DispatchServiceTest {
         verify(concurrencyGuard).acquireLease(801L, "exec-801", 60);
         verify(taskRepository).casWaitHoldToRunning(eq(801L), eq(null), eq(Thread.currentThread().getName()), any(LocalDateTime.class));
         verify(workerService).submit(holdTask, group, "exec-801");
+    }
+
+    @Test
+    void shouldRemoveStaleReadyMemberBeforeAcquiringConcurrency() {
+        GroupConfig group = group("g1", 5, 2, 60);
+        SchedulerTask stale = runnableTask(901L, "u1", 0);
+        stale.setGroupCode("g2");
+
+        when(groupConfigRepository.listEnabled()).thenReturn(List.of(group));
+        when(queueRedisService.promoteDueTasks(eq("g1"), eq(ROUTE), anyLong(), eq(2))).thenReturn(List.of());
+        when(concurrencyGuard.groupRunning("g1")).thenReturn(0L, 0L);
+        when(queueRedisService.peekNextActiveUser("g1", ROUTE)).thenReturn("u1", null);
+        when(queueRedisService.tryAcquireActiveUserLock("g1", ROUTE, "u1", 5000L)).thenReturn("lock-u1");
+        when(queueRedisService.peekReadyHeadPriority("g1", ROUTE, "u1")).thenReturn(0, null);
+        when(queueRedisService.peekReadyTasksByPriority("g1", ROUTE, "u1", 0, 2)).thenReturn(List.of(901L));
+        when(taskRepository.findByIds(List.of(901L))).thenReturn(Map.of(901L, stale));
+        when(dynamicUserLimitService.calculate(eq(group), anyLong())).thenReturn(2);
+
+        dispatchService.dispatchOnce();
+
+        verify(queueRedisService).removeFromReadyQueue("g1", ROUTE, "u1", 901L);
+        verify(concurrencyGuard, never()).tryAcquire(anyString(), anyString(), anyLong(),
+                anyInt(), anyInt(), anyInt(), anyString());
+        verify(workerService, never()).submit(any(), any(), anyString());
     }
 
     private GroupConfig group(String groupCode, int maxConcurrency, int dispatchBatchSize, int lockExpireSec) {

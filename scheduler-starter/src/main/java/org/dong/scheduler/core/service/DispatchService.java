@@ -12,12 +12,12 @@ import org.dong.scheduler.core.repo.GroupConfigRepository;
 import org.dong.scheduler.core.repo.TaskRepository;
 import org.dong.scheduler.core.spi.BusinessTaskStateProvider;
 import org.dong.scheduler.core.spi.TaskHandler;
-import org.springframework.core.task.TaskRejectedException;
 
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -89,6 +89,12 @@ public class DispatchService {
             boolean addedToReady = false;
             SchedulerTask task = dueTasks.get(taskId);
             if (task != null) {
+                if (!Objects.equals(task.getGroupCode(), cfg.getGroupCode())
+                        || !sameRoute(task.getDispatchRoute(), dispatchRoute)) {
+                    log.debug("remove stale time queue member, taskId={}, queueGroup={}, dbGroup={}",
+                            taskId, cfg.getGroupCode(), task.getGroupCode());
+                    continue;
+                }
                 LocalDateTime currentNow = LocalDateTime.now();
                 if (task.getStatus() == TaskStatus.PENDING) {
                     boolean promotedNow = taskRepository.markRunnableIfPending(task.getId(), currentNow);
@@ -162,7 +168,17 @@ public class DispatchService {
                 for (Long taskId : ready) {
                     SchedulerTask task = readyTasks.get(taskId);
                     if (task == null) {
+                        queueRedisService.removeFromReadyQueue(cfg.getGroupCode(), dispatchRoute, userId, taskId);
                         skipped++;
+                        continue;
+                    }
+                    if (!Objects.equals(task.getGroupCode(), cfg.getGroupCode())
+                            || !sameRoute(task.getDispatchRoute(), dispatchRoute)
+                            || !Objects.equals(task.getUserId(), userId)) {
+                        queueRedisService.removeFromReadyQueue(cfg.getGroupCode(), dispatchRoute, userId, taskId);
+                        skipped++;
+                        log.debug("remove stale ready queue member, taskId={}, queueGroup={}, dbGroup={}",
+                                taskId, cfg.getGroupCode(), task.getGroupCode());
                         continue;
                     }
                     boolean waitHoldTask = task.getStatus() == TaskStatus.WAIT_HOLD;
@@ -297,7 +313,8 @@ public class DispatchService {
 
                     boolean cas = waitHoldTask
                             ? taskRepository.casWaitHoldToRunning(task.getId(), properties.getInstanceId(), Thread.currentThread().getName(), currentNow)
-                            : taskRepository.casToRunning(task.getId(), properties.getInstanceId(), Thread.currentThread().getName(), currentNow);
+                            : taskRepository.casToRunning(task.getId(), task.getGroupCode(), task.getVersion(),
+                                    properties.getInstanceId(), Thread.currentThread().getName(), currentNow);
                     if (!cas) {
                         if (freshTask) {
                             boolean released = concurrencyGuard.release(cfg.getGroupCode(), task.getUserId(), task.getId(), executeNo);
@@ -406,5 +423,11 @@ public class DispatchService {
             current = current.getCause();
         }
         return false;
+    }
+
+    private boolean sameRoute(String left, String right) {
+        String normalizedLeft = left == null || left.isBlank() ? null : left;
+        String normalizedRight = right == null || right.isBlank() ? null : right;
+        return Objects.equals(normalizedLeft, normalizedRight);
     }
 }

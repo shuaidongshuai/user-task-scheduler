@@ -17,6 +17,8 @@ import org.dong.scheduler.core.service.DefaultTaskDependencyService;
 import org.dong.scheduler.core.service.DefaultSchedulerClient;
 import org.dong.scheduler.core.service.DispatchService;
 import org.dong.scheduler.core.service.DynamicUserLimitService;
+import org.dong.scheduler.core.service.GroupFallbackScanner;
+import org.dong.scheduler.core.service.GroupFallbackService;
 import org.dong.scheduler.core.service.RecoveryService;
 import org.dong.scheduler.core.service.TaskDependencyService;
 import org.dong.scheduler.core.service.TaskHandlerRegistry;
@@ -35,11 +37,15 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.net.InetAddress;
 import java.util.UUID;
+import java.util.concurrent.SynchronousQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 
 @AutoConfiguration
 @EnableScheduling
@@ -109,6 +115,37 @@ public class SchedulerAutoConfiguration {
         return executor;
     }
 
+    @Bean(name = "fallbackCallbackExecutor", destroyMethod = "shutdown")
+    @ConditionalOnMissingBean(name = "fallbackCallbackExecutor")
+    public ThreadPoolExecutor fallbackCallbackExecutor(SchedulerProperties properties) {
+        validateFallbackProperties(properties);
+        ThreadPoolExecutor executor = new ThreadPoolExecutor(
+                properties.getFallbackCallbackThreads(),
+                properties.getFallbackCallbackThreads(),
+                0L,
+                TimeUnit.MILLISECONDS,
+                new SynchronousQueue<>(),
+                runnable -> {
+                    Thread thread = new Thread(runnable);
+                    thread.setName("sched-fallback-callback-" + thread.threadId());
+                    thread.setDaemon(true);
+                    return thread;
+                },
+                new ThreadPoolExecutor.AbortPolicy()
+        );
+        executor.prestartAllCoreThreads();
+        return executor;
+    }
+
+    @Bean(name = "fallbackTaskScheduler")
+    @ConditionalOnMissingBean(name = "fallbackTaskScheduler")
+    public ThreadPoolTaskScheduler fallbackTaskScheduler() {
+        ThreadPoolTaskScheduler scheduler = new ThreadPoolTaskScheduler();
+        scheduler.setPoolSize(1);
+        scheduler.setThreadNamePrefix("sched-fallback-scan-");
+        return scheduler;
+    }
+
     @Bean
     @ConditionalOnMissingBean
     public BusinessTaskStateProviderRegistry businessTaskStateProviderRegistry(
@@ -135,6 +172,31 @@ public class SchedulerAutoConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
+    public GroupFallbackService groupFallbackService(SchedulerProperties properties,
+                                                     TaskRepository taskRepository,
+                                                     GroupConfigRepository groupConfigRepository,
+                                                     TaskDependencyService taskDependencyService,
+                                                     QueueRedisService queueRedisService,
+                                                     TransactionTemplate transactionTemplate) {
+        return new GroupFallbackService(properties, taskRepository, groupConfigRepository,
+                taskDependencyService, queueRedisService, transactionTemplate);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public GroupFallbackScanner groupFallbackScanner(
+            SchedulerProperties properties,
+            TaskRepository taskRepository,
+            TaskHandlerRegistry taskHandlerRegistry,
+            TaskStateService taskStateService,
+            GroupFallbackService groupFallbackService,
+            @Qualifier("fallbackCallbackExecutor") ThreadPoolExecutor fallbackCallbackExecutor) {
+        return new GroupFallbackScanner(properties, taskRepository, taskHandlerRegistry,
+                taskStateService, groupFallbackService, fallbackCallbackExecutor);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
     public WorkerService workerService(SchedulerProperties properties,
                                        TaskRepository taskRepository,
                                        TaskHandlerRegistry handlerRegistry,
@@ -143,10 +205,12 @@ public class SchedulerAutoConfiguration {
                                        QueueRedisService queueRedisService,
                                        RecoveryService recoveryService,
                                        TaskStateService taskStateService,
+                                       GroupConfigRepository groupConfigRepository,
                                        @Qualifier("schedulerWorkerExecutor") ThreadPoolTaskExecutor schedulerWorkerExecutor) {
         ensureInstanceId(properties);
         return new WorkerService(properties, taskRepository, handlerRegistry, concurrencyGuard,
-                queueRedisService, recoveryService, schedulerWorkerExecutor, businessTaskStateProviderRegistry, taskStateService);
+                queueRedisService, recoveryService, schedulerWorkerExecutor, businessTaskStateProviderRegistry,
+                taskStateService, groupConfigRepository);
     }
 
     @Bean
@@ -182,8 +246,11 @@ public class SchedulerAutoConfiguration {
     @ConditionalOnMissingBean
     public SchedulerJobs schedulerJobs(DispatchService dispatchService,
                                        RecoveryService recoveryService,
-                                       GroupConfigRepository groupConfigRepository) {
-        return new SchedulerJobs(dispatchService, recoveryService, groupConfigRepository);
+                                       GroupConfigRepository groupConfigRepository,
+                                       GroupFallbackScanner groupFallbackScanner,
+                                       SchedulerProperties properties) {
+        return new SchedulerJobs(dispatchService, recoveryService, groupConfigRepository,
+                groupFallbackScanner, properties);
     }
 
     @Bean
@@ -233,6 +300,22 @@ public class SchedulerAutoConfiguration {
     private static void ensureInstanceId(SchedulerProperties properties) {
         if (properties.getInstanceId() == null || properties.getInstanceId().isBlank()) {
             properties.setInstanceId(defaultInstanceId());
+        }
+    }
+
+    private static void validateFallbackProperties(SchedulerProperties properties) {
+        if (properties.getFallbackCallbackThreads() < 1) {
+            throw new IllegalArgumentException("fallbackCallbackThreads must be at least 1");
+        }
+        if (properties.getFallbackCallbackQueueCapacity() != 0) {
+            throw new IllegalArgumentException("fallbackCallbackQueueCapacity must be 0");
+        }
+        if (properties.getFallbackPolicyTimeoutMs() < 1) {
+            throw new IllegalArgumentException("fallbackPolicyTimeoutMs must be at least 1");
+        }
+        if (properties.getFallbackExecutorRejectBackoffMs() < properties.getFallbackMinNextCheckDelayMs()) {
+            throw new IllegalArgumentException(
+                    "fallbackExecutorRejectBackoffMs must be no less than fallbackMinNextCheckDelayMs");
         }
     }
 }

@@ -27,6 +27,9 @@ public class SchedulerTask {
     private Integer retryDelaySec;
     private Integer maxWaitSec;
     private LocalDateTime waitDeadlineAt;
+    private LocalDateTime fallbackCheckAt;
+    private int fallbackPolicyCount;
+    private int groupFallbackCount;
     private String dispatcherInstance;
     private String workerInstance;
     private String workerThread;

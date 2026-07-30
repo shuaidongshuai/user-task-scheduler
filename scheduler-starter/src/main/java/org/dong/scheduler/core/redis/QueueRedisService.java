@@ -63,10 +63,20 @@ public class QueueRedisService {
     }
 
     public void removeFromReadyQueue(SchedulerTask task) {
+        removeFromReadyQueue(task.getGroupCode(), task.getDispatchRoute(), task.getUserId(), task.getId());
+    }
+
+    public void removeFromReadyQueue(String queueGroupCode, String dispatchRoute, String userId, long taskId) {
         redisTemplate.opsForZSet().remove(
-                RedisKeys.userReadyQueue(task.getGroupCode(), task.getDispatchRoute(), task.getUserId()),
-                String.valueOf(task.getId())
+                RedisKeys.userReadyQueue(queueGroupCode, dispatchRoute, userId),
+                String.valueOf(taskId)
         );
+    }
+
+    public void removeQueueReferences(SchedulerTask oldSnapshot) {
+        removeFromTime(oldSnapshot.getGroupCode(), oldSnapshot.getDispatchRoute(), oldSnapshot.getId());
+        removeFromReadyQueue(oldSnapshot);
+        rebalanceActiveUser(oldSnapshot.getGroupCode(), oldSnapshot.getDispatchRoute(), oldSnapshot.getUserId());
     }
 
     public String peekNextActiveUser(String groupCode, String dispatchRoute) {

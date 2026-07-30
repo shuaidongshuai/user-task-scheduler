@@ -64,6 +64,15 @@ utask:
     default-group-heartbeat-timeout-sec: 90
     default-group-lock-expire-sec: 120
     dispatch-interval-ms: 500
+    # 默认开启；设置为 false 可立即停止 fallback 扫描。
+    fallback-enabled: true
+    fallback-scan-interval-ms: 1000
+    fallback-scan-limit: 200
+    fallback-min-next-check-delay-ms: 1000
+    fallback-policy-timeout-ms: 3000
+    fallback-callback-threads: 4
+    fallback-callback-queue-capacity: 0
+    fallback-executor-reject-backoff-ms: 5000
     recovery-interval-ms: 30000
     queue-refill-interval-ms: 15000
     worker-threads: 16
@@ -89,6 +98,11 @@ public class ImageRenderHandler implements TaskHandler {
         // 执行业务逻辑
         return TaskExecuteResult.success();
     }
+
+    @Override
+    public GroupFallbackDecision onGroupWaitTimeout(SchedulerTask task) {
+        return GroupFallbackDecision.routeTo("image-render-backup", null);
+    }
 }
 ```
 
@@ -108,6 +122,7 @@ public void submitDemo() {
             .setHoldMaxRounds(300)
             .setHoldRetryDelaySec(5)
             .setRetryDelaySec(20)
+            .setFallbackCheckAt(LocalDateTime.now().plusSeconds(30))
             .setExtInfo("{\"prompt\":\"hello\"}");
     long taskId = schedulerClient.submit(req);
 }
@@ -207,6 +222,7 @@ create index idx_route_status_time on scheduler_task(dispatch_route, status, exe
 
 - 仅支持立即执行任务：`executeAt` 需要小于等于当前时间
 - 不支持 `dependencies`
+- 不支持 `fallbackCheckAt`；传入时抛出 `SYNC_FALLBACK_CHECK_UNSUPPORTED`
 - 同步路径按单次执行处理，不走异步重试链路
 - 若 group 或 user 并发已满，会直接抛出 `SchedulerException`
 - 限流错误枚举为 `SchedulerErrorCode.CONCURRENCY_LIMIT`
@@ -260,6 +276,72 @@ BatchSubmitRequest request = new BatchSubmitRequest(List.of(
 
 schedulerClient.submitBatch(request);
 ```
+
+### 非运行态动态 Group 降级
+
+异步任务可通过 `fallbackCheckAt` 指定首次策略检查的绝对时间。检查到期且任务仍处于
+`PENDING`、`RUNNABLE` 或 `WAIT_RETRY` 时，框架调用 `TaskHandler#onGroupWaitTimeout`。
+
+Handler 可返回：
+
+- `routeTo(groupCode, nextCheckAt)`：切换到另一个已启用 Group，可选继续检查。
+- `keepCurrent(nextCheckAt)`：保留当前 Group，并在未来再次检查。
+- `stopChecking()`：停止后续降级检查。
+- `fail(code, message)`：将任务置为失败并传播依赖终态。
+
+`RUNNING` 与仍持有并发的 `WAIT_HOLD` 不会触发该回调。回调应快速、无副作用并响应线程中断；
+多实例竞争时回调可能重复计算，但只有符合任务快照的数据库 CAS 能生效。
+
+### 执行期重试切换 Group
+
+当 `TaskHandler#execute` 发现当前 group 不适合继续处理时，可返回
+`TaskExecuteResult.retryableOnGroup(errorCode, errorMessage, targetGroupCode)`。框架验证 target group
+已启用后，原子地将任务改为 `WAIT_RETRY` 和目标 `group_code`，下一次执行由目标 group 调度：
+
+```java
+return TaskExecuteResult.retryableOnGroup(
+        "UPSTREAM_OVERLOADED", "retry through backup group", "image-render-backup");
+```
+
+若无需记录错误原因，也可简写为 `TaskExecuteResult.retryableOnGroup("image-render-backup")`。
+
+这仅适用于可重试执行：本次执行的并发始终从 source group 释放，避免把 `WAIT_HOLD` 的持有并发错误地
+迁移到 target group。目标 group 不存在、未启用、与 source 相同或重试 CAS 失败时，任务会失败并记录
+`EXECUTION_TARGET_GROUP_INVALID`。
+
+已有数据库升级时，先执行：
+
+- [upgrade-group-fallback.sql](/Users/chenmingdong01/Documents/github/user-task-scheduler/scheduler-starter/src/main/resources/sql/upgrade-group-fallback.sql)
+
+#### 本地 HTTP 冒烟脚本
+
+先通过 Reactor 构建当前 Starter 与 Demo，再启动生成的 Boot Jar；不要单独执行
+`mvn -pl demo-consumer spring-boot:run`，否则可能加载本地 Maven 仓库中旧的
+`scheduler-starter` SNAPSHOT。启动时确保 `dispatch-enabled=true`、`fallback-enabled=true`；若服务
+配置了 `dispatch-route`，脚本参数必须使用相同值。脚本需要可连接的 MySQL（用于状态断言）以及
+`requests`、`pymysql` Python 依赖。
+
+```bash
+mvn -pl demo-consumer -am -DskipTests package
+java -jar demo-consumer/target/demo-consumer-1.0-SNAPSHOT.jar \
+  --utask.scheduler.dispatch-enabled=true \
+  --utask.scheduler.fallback-enabled=true
+```
+
+```bash
+python3 scripts/run_group_fallback_http_smoke.py \
+  --base-url http://127.0.0.1:8099
+```
+
+默认不使用 `dispatch-route`。只有服务显式配置了 route 隔离时，才在启动参数和脚本中同时传入同一个值：
+
+```bash
+--utask.scheduler.dispatch-route=render-service
+```
+
+脚本会创建唯一的 source/target Group，通过 HTTP 验证普通任务成功、未来执行的任务在
+`fallbackCheckAt` 到期后切换到 target Group 并写入审计日志，以及执行期返回重试切换 group 后最终成功。
+默认清理本次任务、业务数据与测试 Group；传入 `--keep-data` 可保留现场排查。
 
 ### WAIT_HOLD：长轮询/外部异步任务
 

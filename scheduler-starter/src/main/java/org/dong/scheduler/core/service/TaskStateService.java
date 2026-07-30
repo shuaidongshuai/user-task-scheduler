@@ -1,5 +1,6 @@
 package org.dong.scheduler.core.service;
 
+import lombok.extern.slf4j.Slf4j;
 import org.dong.scheduler.core.enums.TaskStatus;
 import org.dong.scheduler.core.exception.SchedulerException;
 import org.dong.scheduler.core.model.SchedulerTask;
@@ -20,6 +21,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
+@Slf4j
 public class TaskStateService {
     private static final String WAIT_TIMEOUT_ERROR_CODE = "SCHEDULE_WAIT_TIMEOUT";
     private static final String WAIT_TIMEOUT_ERROR_MSG = "task exceeded max wait before running";
@@ -98,7 +100,8 @@ public class TaskStateService {
                     throw SchedulerException.concurrencyLimit();
                 }
                 acquiredRef.set(new DirectAcquireContext(groupConfig.getGroupCode(), request.getUserId(), createdTaskId, executeNo));
-                boolean running = taskRepository.casToRunning(createdTaskId, instanceId, threadName, now);
+                boolean running = taskRepository.casToRunning(
+                        createdTaskId, request.getGroupCode(), 0, instanceId, threadName, now);
                 if (!running) {
                     boolean released = concurrencyGuard.release(groupConfig.getGroupCode(), request.getUserId(), createdTaskId, executeNo);
                     acquiredRef.set(null);
@@ -213,12 +216,33 @@ public class TaskStateService {
     }
 
     public boolean markFailedByWaitDeadline(Long taskId, LocalDateTime now) {
-        return transitionTerminal(
-                taskId,
-                now,
-                () -> taskRepository.markFailedByWaitDeadline(taskId, WAIT_TIMEOUT_ERROR_CODE, WAIT_TIMEOUT_ERROR_MSG, now),
-                TaskStatus.FAILED
-        );
+        WaitDeadlineTransitionResult result = transactionTemplate.execute(tx -> {
+            SchedulerTask sourceSnapshot = taskRepository.findByIdForUpdate(taskId).orElse(null);
+            if (sourceSnapshot == null || !fallbackWaitingStatus(sourceSnapshot.getStatus())
+                    || !sourceSnapshot.waitingTimedOut(now)) {
+                return new WaitDeadlineTransitionResult(false, null, List.of());
+            }
+            boolean changed = taskRepository.markFailedByWaitDeadline(
+                    sourceSnapshot, WAIT_TIMEOUT_ERROR_CODE, WAIT_TIMEOUT_ERROR_MSG, now);
+            if (!changed) {
+                return new WaitDeadlineTransitionResult(false, null, List.of());
+            }
+            List<SchedulerTask> queueTasks = taskDependencyService.onUpstreamTaskTerminal(
+                    taskId, TaskStatus.FAILED, now);
+            return new WaitDeadlineTransitionResult(true, sourceSnapshot, queueTasks);
+        });
+        if (result == null || !result.changed) {
+            return false;
+        }
+        try {
+            queueRedisService.removeQueueReferences(result.sourceSnapshot);
+        } catch (RuntimeException ex) {
+            log.error("failed to clean wait-timeout queue references, taskId={}, taskNo={}, group={}, route={}",
+                    result.sourceSnapshot.getId(), result.sourceSnapshot.getTaskNo(),
+                    result.sourceSnapshot.getGroupCode(), result.sourceSnapshot.getDispatchRoute(), ex);
+        }
+        enqueueTasks(result.queueTasks);
+        return true;
     }
 
     public boolean markTerminalByBusinessState(Long taskId, TaskStatus status, LocalDateTime now) {
@@ -272,6 +296,10 @@ public class TaskStateService {
         queueRedisService.enqueue(task);
     }
 
+    private boolean fallbackWaitingStatus(TaskStatus status) {
+        return status == TaskStatus.PENDING || status == TaskStatus.RUNNABLE || status == TaskStatus.WAIT_RETRY;
+    }
+
     private List<TaskDependencyRequest> resolveDependencies(List<BatchSubmitDependencyRequest> dependencies,
                                                             Map<String, Long> refToTaskId) {
         List<TaskDependencyRequest> resolved = new ArrayList<>();
@@ -303,6 +331,13 @@ public class TaskStateService {
 
     private record TerminalTransitionResult(
             boolean changed,
+            List<SchedulerTask> queueTasks
+    ) {
+    }
+
+    private record WaitDeadlineTransitionResult(
+            boolean changed,
+            SchedulerTask sourceSnapshot,
             List<SchedulerTask> queueTasks
     ) {
     }

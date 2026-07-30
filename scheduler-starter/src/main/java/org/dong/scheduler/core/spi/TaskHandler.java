@@ -2,6 +2,7 @@ package org.dong.scheduler.core.spi;
 
 import org.dong.scheduler.core.model.SchedulerTask;
 import org.dong.scheduler.core.model.TaskExecuteResult;
+import org.dong.scheduler.core.model.GroupFallbackDecision;
 
 import java.util.List;
 
@@ -26,4 +27,8 @@ public interface TaskHandler {
     List<String> bizTypes();
 
     TaskExecuteResult execute(SchedulerTask task) throws Exception;
+
+    default GroupFallbackDecision onGroupWaitTimeout(SchedulerTask task) {
+        return GroupFallbackDecision.stopChecking();
+    }
 }

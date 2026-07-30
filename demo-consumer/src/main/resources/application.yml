@@ -24,12 +24,23 @@ spring:
     redis:
       host: 127.0.0.1
       port: 6379
-
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: none
 utask:
   scheduler:
     enabled: true
     dispatch-enabled: false
     dispatch-interval-ms: 500
+    fallback-enabled: true
+    fallback-scan-interval-ms: 1000
+    fallback-scan-limit: 200
+    fallback-min-next-check-delay-ms: 1000
+    fallback-policy-timeout-ms: 3000
+    fallback-callback-threads: 4
+    fallback-callback-queue-capacity: 0
+    fallback-executor-reject-backoff-ms: 5000
     recovery-interval-ms: 10000
     queue-refill-interval-ms: 10000
     worker-threads: 8

@@ -216,6 +216,37 @@ class DefaultSchedulerClientTest {
     }
 
     @Test
+    void shouldRejectFallbackForSyncExecutionWithDedicatedError() {
+        TaskSubmitRequest request = new TaskSubmitRequest()
+                .setUserId("u1")
+                .setBizType("demo.biz")
+                .setBizKey("biz-sync-fallback")
+                .setExecuteAt(LocalDateTime.now())
+                .setFallbackCheckAt(LocalDateTime.now().plusSeconds(1));
+
+        SchedulerException ex = assertThrows(SchedulerException.class, () -> schedulerClient.executeSync(request));
+
+        assertEquals(SchedulerErrorCode.SYNC_FALLBACK_CHECK_UNSUPPORTED.getCode(), ex.getErrorCode());
+    }
+
+    @Test
+    void shouldRejectFallbackCheckAtOnOrAfterWaitDeadline() {
+        LocalDateTime executeAt = LocalDateTime.now();
+        TaskSubmitRequest request = new TaskSubmitRequest()
+                .setUserId("u1")
+                .setBizType("demo.biz")
+                .setBizKey("biz-invalid-fallback")
+                .setExecuteAt(executeAt)
+                .setMaxWaitSec(10)
+                .setFallbackCheckAt(executeAt.plusSeconds(10));
+
+        IllegalArgumentException ex = assertThrows(
+                IllegalArgumentException.class, () -> schedulerClient.submit(request));
+
+        assertEquals("fallbackCheckAt must be before waitDeadlineAt", ex.getMessage());
+    }
+
+    @Test
     void shouldRejectBatchDependencyCycle() {
         BatchSubmitRequest request = new BatchSubmitRequest(List.of(
                 new BatchSubmitTaskRequest()

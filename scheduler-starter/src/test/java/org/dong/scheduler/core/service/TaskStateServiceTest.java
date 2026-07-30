@@ -261,6 +261,13 @@ class TaskStateServiceTest {
     @Test
     void shouldExpireWaitingTasksAndTriggerDependencyRefresh() {
         LocalDateTime now = LocalDateTime.now();
+        SchedulerTask source = new SchedulerTask();
+        source.setId(201L);
+        source.setGroupCode("g1");
+        source.setUserId("u1");
+        source.setStatus(TaskStatus.RUNNABLE);
+        source.setVersion(3);
+        source.setWaitDeadlineAt(now.minusSeconds(1));
         SchedulerTask downstream = new SchedulerTask();
         downstream.setId(301L);
         downstream.setGroupCode("g1");
@@ -268,8 +275,9 @@ class TaskStateServiceTest {
         downstream.setExecuteAt(now.minusSeconds(1));
 
         when(taskRepository.findWaitingTimeoutTaskIds(now, 100)).thenReturn(List.of(201L));
+        when(taskRepository.findByIdForUpdate(201L)).thenReturn(Optional.of(source));
         when(taskRepository.markFailedByWaitDeadline(
-                201L,
+                source,
                 "SCHEDULE_WAIT_TIMEOUT",
                 "task exceeded max wait before running",
                 now
@@ -279,6 +287,7 @@ class TaskStateServiceTest {
         int expired = taskStateService.expireWaitingTasks(100, now);
 
         assertEquals(1, expired);
+        verify(queueRedisService).removeQueueReferences(source);
         verify(queueRedisService).enqueueReady(downstream);
     }
 }

@@ -7,6 +7,7 @@ import org.dong.scheduler.core.model.TaskExecuteResult;
 import org.dong.scheduler.core.redis.ConcurrencyGuard;
 import org.dong.scheduler.core.redis.QueueRedisService;
 import org.dong.scheduler.core.repo.TaskRepository;
+import org.dong.scheduler.core.repo.GroupConfigRepository;
 import org.dong.scheduler.core.spi.TaskHandler;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -17,6 +18,7 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -26,6 +28,7 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -44,6 +47,8 @@ class WorkerServiceReleaseMismatchTest {
     private TaskHandler taskHandler;
     @Mock
     private TaskStateService taskStateService;
+    @Mock
+    private GroupConfigRepository groupConfigRepository;
 
     private ThreadPoolTaskExecutor workerExecutor;
     private WorkerService workerService;
@@ -288,5 +293,66 @@ class WorkerServiceReleaseMismatchTest {
         verify(queueRedisService).enqueue(reloadedTask);
         verify(taskRepository).finishExecution(eq("exec-throw"), eq(org.dong.scheduler.core.enums.TaskStatus.WAIT_RETRY),
                 eq("TASK_EXCEPTION"), eq("boom"), any(LocalDateTime.class));
+    }
+
+    @Test
+    void shouldSwitchGroupBeforeSchedulingHandlerRequestedRetry() throws Exception {
+        SchedulerProperties properties = new SchedulerProperties();
+        properties.setInstanceId("ins-test");
+        properties.setWorkerThreads(2);
+        properties.setHeartbeatIntervalSec(60);
+        properties.setDefaultExecuteTimeoutSec(5);
+        properties.setDefaultRetryDelaySec(30);
+
+        workerExecutor = new ThreadPoolTaskExecutor();
+        workerExecutor.setCorePoolSize(1);
+        workerExecutor.setMaxPoolSize(1);
+        workerExecutor.setQueueCapacity(8);
+        workerExecutor.initialize();
+
+        SchedulerTask rescheduled = new SchedulerTask();
+        rescheduled.setId(1L);
+        rescheduled.setGroupCode("g2");
+        GroupConfig target = new GroupConfig();
+        target.setGroupCode("g2");
+        target.setEnabled(true);
+        when(taskHandler.bizTypes()).thenReturn(List.of("demo.biz"));
+        when(taskHandler.execute(any(SchedulerTask.class)))
+                .thenReturn(TaskExecuteResult.retryableOnGroup("TEMPORARY", "try target group", "g2"));
+        when(groupConfigRepository.findEnabledByGroupCode("g2")).thenReturn(Optional.of(target));
+        when(taskRepository.markWaitRetryOnGroup(eq(1L), any(LocalDateTime.class), eq("TEMPORARY"),
+                eq("try target group"), eq("g1"), eq("g2"), any(LocalDateTime.class))).thenReturn(true);
+        when(taskRepository.findById(1L)).thenReturn(Optional.of(rescheduled));
+        when(concurrencyGuard.release("g1", "u1", 1L, "exec-switch")).thenReturn(true);
+
+        TaskHandlerRegistry registry = new TaskHandlerRegistry(List.of(taskHandler));
+        BusinessTaskStateProviderRegistry stateProviderRegistry = new BusinessTaskStateProviderRegistry(List.of());
+        workerService = new WorkerService(properties, taskRepository, registry, concurrencyGuard,
+                queueRedisService, recoveryService, workerExecutor, stateProviderRegistry, taskStateService,
+                groupConfigRepository);
+
+        SchedulerTask task = new SchedulerTask();
+        task.setId(1L);
+        task.setTaskNo("task-1");
+        task.setGroupCode("g1");
+        task.setUserId("u1");
+        task.setBizType("demo.biz");
+        task.setExecuteAt(LocalDateTime.now());
+        task.setMaxRetryCount(1);
+
+        GroupConfig source = new GroupConfig();
+        source.setLockExpireSec(30);
+        workerService.executeDirect(task, source, "exec-switch");
+
+        verify(taskRepository).markWaitRetryOnGroup(eq(1L), any(LocalDateTime.class), eq("TEMPORARY"),
+                eq("try target group"), eq("g1"), eq("g2"), any(LocalDateTime.class));
+        verify(taskRepository, never()).markWaitRetry(eq(1L), any(LocalDateTime.class), anyString(),
+                anyString(), any(LocalDateTime.class));
+        org.mockito.InOrder queueOrder = inOrder(queueRedisService);
+        queueOrder.verify(queueRedisService).removeQueueReferences(task);
+        queueOrder.verify(queueRedisService).enqueue(rescheduled);
+        verify(concurrencyGuard).release("g1", "u1", 1L, "exec-switch");
+        verify(taskRepository).finishExecution(eq("exec-switch"), eq(org.dong.scheduler.core.enums.TaskStatus.WAIT_RETRY),
+                eq("TEMPORARY"), eq("try target group"), any(LocalDateTime.class));
     }
 }

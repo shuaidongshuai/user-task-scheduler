@@ -1,7 +1,8 @@
 package org.dong.scheduler.core.enums;
 
 public enum SchedulerErrorCode {
-    CONCURRENCY_LIMIT(429, "sync task is throttled by concurrency limit");
+    CONCURRENCY_LIMIT(429, "sync task is throttled by concurrency limit"),
+    SYNC_FALLBACK_CHECK_UNSUPPORTED(4001, "executeSync does not support fallbackCheckAt");
 
     private final int code;
     private final String message;

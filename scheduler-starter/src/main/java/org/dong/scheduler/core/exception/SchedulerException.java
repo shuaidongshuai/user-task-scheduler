@@ -24,4 +24,8 @@ public class SchedulerException extends IllegalStateException {
         return new SchedulerException(SchedulerErrorCode.CONCURRENCY_LIMIT, message);
     }
 
+    public static SchedulerException syncFallbackUnsupported() {
+        return new SchedulerException(SchedulerErrorCode.SYNC_FALLBACK_CHECK_UNSUPPORTED);
+    }
+
 }

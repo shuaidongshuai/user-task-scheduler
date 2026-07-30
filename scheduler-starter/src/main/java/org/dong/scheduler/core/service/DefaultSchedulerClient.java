@@ -3,6 +3,7 @@ package org.dong.scheduler.core.service;
 import lombok.extern.slf4j.Slf4j;
 import org.dong.scheduler.config.SchedulerProperties;
 import org.dong.scheduler.core.enums.TaskStatus;
+import org.dong.scheduler.core.exception.SchedulerException;
 import org.dong.scheduler.core.model.GroupConfig;
 import org.dong.scheduler.core.model.SchedulerTask;
 import org.dong.scheduler.core.model.TaskDependencyRequest;
@@ -153,6 +154,9 @@ public class DefaultSchedulerClient implements SchedulerClient {
 
     private TaskSubmitRequest normalizeSync(TaskSubmitRequest request) {
         TaskSubmitRequest normalized = normalizeBase(request);
+        if (normalized.getFallbackCheckAt() != null) {
+            throw SchedulerException.syncFallbackUnsupported();
+        }
         if (normalized.getDependencies() != null && !normalized.getDependencies().isEmpty()) {
             throw new IllegalArgumentException("sync submit does not support dependencies");
         }
@@ -208,6 +212,10 @@ public class DefaultSchedulerClient implements SchedulerClient {
             request.setWaitDeadlineAt(request.getExecuteAt().plusSeconds(request.getMaxWaitSec()));
         } else {
             request.setWaitDeadlineAt(null);
+        }
+        if (request.getFallbackCheckAt() != null && request.getWaitDeadlineAt() != null
+                && !request.getFallbackCheckAt().isBefore(request.getWaitDeadlineAt())) {
+            throw new IllegalArgumentException("fallbackCheckAt must be before waitDeadlineAt");
         }
         if (request.getPriority() == null) {
             request.setPriority(0);
@@ -276,6 +284,7 @@ public class DefaultSchedulerClient implements SchedulerClient {
                     .setHoldRetryDelaySec(task.getHoldRetryDelaySec())
                     .setRetryDelaySec(task.getRetryDelaySec())
                     .setMaxWaitSec(task.getMaxWaitSec())
+                    .setFallbackCheckAt(task.getFallbackCheckAt())
                     .setExtInfo(task.getExtInfo())
                     .setDependencies(List.of()));
             List<BatchSubmitDependencyRequest> dependencies = normalizeBatchDependencies(ref, task.getDependencies());

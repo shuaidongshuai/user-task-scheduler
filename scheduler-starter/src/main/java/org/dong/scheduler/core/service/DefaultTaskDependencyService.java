@@ -36,6 +36,12 @@ public class DefaultTaskDependencyService implements TaskDependencyService {
     }
 
     @Override
+    public boolean hasUnsatisfiedDependencies(Long taskId) {
+        TaskDependencySummary summary = taskDependencyRepository.summarize(taskId);
+        return summary.getTotalCount() > 0 && !summary.allSatisfied();
+    }
+
+    @Override
     public List<SchedulerTask> onUpstreamTaskTerminal(Long upstreamTaskId, TaskStatus actualStatus, LocalDateTime now) {
         taskDependencyRepository.updateByUpstreamTerminal(upstreamTaskId, actualStatus, now);
         List<Long> taskIds = taskDependencyRepository.findDependentTaskIds(upstreamTaskId);

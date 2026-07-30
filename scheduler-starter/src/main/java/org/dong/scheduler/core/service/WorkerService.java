@@ -9,6 +9,7 @@ import org.dong.scheduler.core.model.SchedulerTask;
 import org.dong.scheduler.core.model.TaskExecuteResult;
 import org.dong.scheduler.core.redis.ConcurrencyGuard;
 import org.dong.scheduler.core.redis.QueueRedisService;
+import org.dong.scheduler.core.repo.GroupConfigRepository;
 import org.dong.scheduler.core.repo.TaskRepository;
 import org.dong.scheduler.core.spi.BusinessTaskStateProvider;
 import org.dong.scheduler.core.spi.TaskHandler;
@@ -38,6 +39,7 @@ public class WorkerService {
     private final ScheduledExecutorService timeoutExecutor;
     private final BusinessTaskStateProviderRegistry businessTaskStateProviderRegistry;
     private final TaskStateService taskStateService;
+    private final GroupConfigRepository groupConfigRepository;
 
     public WorkerService(SchedulerProperties properties,
                          TaskRepository taskRepository,
@@ -48,6 +50,20 @@ public class WorkerService {
                          ThreadPoolTaskExecutor workerExecutor,
                          BusinessTaskStateProviderRegistry businessTaskStateProviderRegistry,
                          TaskStateService taskStateService) {
+        this(properties, taskRepository, handlerRegistry, concurrencyGuard, queueRedisService, recoveryService,
+                workerExecutor, businessTaskStateProviderRegistry, taskStateService, null);
+    }
+
+    public WorkerService(SchedulerProperties properties,
+                         TaskRepository taskRepository,
+                         TaskHandlerRegistry handlerRegistry,
+                         ConcurrencyGuard concurrencyGuard,
+                         QueueRedisService queueRedisService,
+                         RecoveryService recoveryService,
+                         ThreadPoolTaskExecutor workerExecutor,
+                         BusinessTaskStateProviderRegistry businessTaskStateProviderRegistry,
+                         TaskStateService taskStateService,
+                         GroupConfigRepository groupConfigRepository) {
         this.properties = properties;
         this.taskRepository = taskRepository;
         this.handlerRegistry = handlerRegistry;
@@ -57,6 +73,7 @@ public class WorkerService {
         this.workerExecutor = workerExecutor;
         this.businessTaskStateProviderRegistry = businessTaskStateProviderRegistry;
         this.taskStateService = taskStateService;
+        this.groupConfigRepository = groupConfigRepository;
         int heartbeatThreads = properties.getHeartbeatThreads() > 0
                 ? properties.getHeartbeatThreads()
                 : Math.max(2, properties.getWorkerThreads() / 4);
@@ -201,7 +218,19 @@ public class WorkerService {
                 }
             } else if (result.isRetryable() && task.canRetry()) {
                 LocalDateTime nextRetry = nextRetryTime(task);
-                taskRepository.markWaitRetry(task.getId(), nextRetry, result.getErrorCode(), result.getErrorMsg(), LocalDateTime.now());
+                if (result.getNextGroupCode() == null) {
+                    taskRepository.markWaitRetry(task.getId(), nextRetry, result.getErrorCode(), result.getErrorMsg(), LocalDateTime.now());
+                } else if (!rescheduleRetryOnRequestedGroup(task, result, nextRetry)) {
+                    errorCode = "EXECUTION_TARGET_GROUP_INVALID";
+                    errorMsg = "requested retry target group is missing, disabled, or invalid";
+                    taskStateService.markFailed(task.getId(), errorCode, errorMsg, LocalDateTime.now());
+                    finalStatus = TaskStatus.FAILED;
+                    log.error("task retry target group rejected, taskId={}, taskNo={}, targetGroup={}",
+                            task.getId(), task.getTaskNo(), result.getNextGroupCode());
+                    return;
+                } else {
+                    removeSourceQueueReferences(task);
+                }
                 taskRepository.findById(task.getId()).ifPresent(queueRedisService::enqueue);
                 finalStatus = TaskStatus.WAIT_RETRY;
                 errorCode = result.getErrorCode();
@@ -317,6 +346,30 @@ public class WorkerService {
 
     private LocalDateTime nextRetryTime(SchedulerTask task) {
         return LocalDateTime.now().plusSeconds(task.retryDelaySec(properties.getDefaultRetryDelaySec()));
+    }
+
+    private boolean rescheduleRetryOnRequestedGroup(SchedulerTask task,
+                                                     TaskExecuteResult result,
+                                                     LocalDateTime nextRetry) {
+        String targetGroupCode = result.getNextGroupCode().trim();
+        if (targetGroupCode.isEmpty() || targetGroupCode.equals(task.getGroupCode())
+                || groupConfigRepository == null
+                || groupConfigRepository.findEnabledByGroupCode(targetGroupCode).isEmpty()) {
+            return false;
+        }
+        return taskRepository.markWaitRetryOnGroup(task.getId(), nextRetry, result.getErrorCode(),
+                result.getErrorMsg(), task.getGroupCode(), targetGroupCode, LocalDateTime.now());
+    }
+
+    private void removeSourceQueueReferences(SchedulerTask sourceTask) {
+        try {
+            queueRedisService.removeQueueReferences(sourceTask);
+        } catch (RuntimeException ex) {
+            log.error("failed to clean source queue references after execution group switch, taskId={}, taskNo={}, "
+                            + "sourceGroup={}, route={}",
+                    sourceTask.getId(), sourceTask.getTaskNo(), sourceTask.getGroupCode(),
+                    sourceTask.getDispatchRoute(), ex);
+        }
     }
 
     private LocalDateTime nextHoldTime(SchedulerTask task) {

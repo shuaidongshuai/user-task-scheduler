@@ -30,6 +30,15 @@ public class SchedulerJobRunner {
         ThreadContextUtil.addNewContext(jobs::expireWaitingTasks).run();
     }
 
+    @Scheduled(fixedDelayString = "${utask.scheduler.fallback-scan-interval-ms:1000}",
+            scheduler = "fallbackTaskScheduler")
+    public void scanGroupFallback() {
+        if (!properties.isDispatchEnabled() || !properties.isFallbackEnabled()) {
+            return;
+        }
+        ThreadContextUtil.addNewContext(jobs::scanGroupFallback).run();
+    }
+
     @Scheduled(fixedDelayString = "${utask.scheduler.recovery-interval-ms:30000}")
     public void recover() {
         if (!properties.isDispatchEnabled()) {

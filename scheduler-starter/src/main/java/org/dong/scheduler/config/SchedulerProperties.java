@@ -28,6 +28,15 @@ public class SchedulerProperties {
     private String defaultGroupDescription = "auto initialized default public group";
     private long dispatchIntervalMs = 500;
     private long waitTimeoutScanIntervalMs = 1000;
+    /** Whether the group fallback scan loop is enabled. Set false to stop fallback processing. */
+    private boolean fallbackEnabled = true;
+    private long fallbackScanIntervalMs = 1000;
+    private int fallbackScanLimit = 200;
+    private long fallbackMinNextCheckDelayMs = 1000;
+    private long fallbackPolicyTimeoutMs = 3000;
+    private int fallbackCallbackThreads = 4;
+    private int fallbackCallbackQueueCapacity = 0;
+    private long fallbackExecutorRejectBackoffMs = 5000;
     private long recoveryIntervalMs = 30_000;
     private long queueRefillIntervalMs = 15_000;
     /**

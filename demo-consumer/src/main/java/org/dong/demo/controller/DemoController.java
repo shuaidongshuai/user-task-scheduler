@@ -2,6 +2,7 @@ package org.dong.demo.controller;
 
 import org.dong.demo.domain.DemoBizTask;
 import org.dong.demo.repo.DemoBizTaskRepository;
+import org.dong.scheduler.config.SchedulerProperties;
 import org.dong.scheduler.core.model.TaskDependencyRequest;
 import org.dong.scheduler.core.model.TaskSubmitRequest;
 import org.dong.scheduler.core.model.batch.BatchSubmitDependencyRequest;
@@ -23,10 +24,24 @@ import java.util.UUID;
 public class DemoController {
     private final SchedulerClient schedulerClient;
     private final DemoBizTaskRepository bizTaskRepository;
+    private final SchedulerProperties schedulerProperties;
 
-    public DemoController(SchedulerClient schedulerClient, DemoBizTaskRepository bizTaskRepository) {
+    public DemoController(SchedulerClient schedulerClient,
+                          DemoBizTaskRepository bizTaskRepository,
+                          SchedulerProperties schedulerProperties) {
         this.schedulerClient = schedulerClient;
         this.bizTaskRepository = bizTaskRepository;
+        this.schedulerProperties = schedulerProperties;
+    }
+
+    @GetMapping("/scheduler-config")
+    public Map<String, Object> schedulerConfig() {
+        return Map.of(
+                "dispatchEnabled", schedulerProperties.isDispatchEnabled(),
+                "fallbackEnabled", schedulerProperties.isFallbackEnabled(),
+                "dispatchRoute", schedulerProperties.getDispatchRoute() == null
+                        ? "" : schedulerProperties.getDispatchRoute()
+        );
     }
 
     @PostMapping("/submit")
@@ -39,11 +54,14 @@ public class DemoController {
 
         TaskSubmitRequest submitRequest = new TaskSubmitRequest()
                 .setGroupCode(request.groupCode())
+                .setDispatchRoute(request.dispatchRoute())
                 .setUserId(request.userId() == null ? "demo-user" : request.userId())
                 .setBizType("demo.biz.process")
                 .setBizKey(bizKey)
                 .setPriority(request.priority() == null ? 50 : request.priority())
                 .setExecuteAt(request.executeAt())
+                .setFallbackCheckAt(request.fallbackCheckAt())
+                .setMaxWaitSec(request.maxWaitSec())
                 .setMaxRetryCount(request.maxRetryCount())
                 .setHoldMaxRounds(request.holdMaxRounds())
                 .setHoldRetryDelaySec(request.holdRetryDelaySec())
@@ -104,6 +122,7 @@ public class DemoController {
 
     public record SubmitRequest(
             String groupCode,
+            String dispatchRoute,
             String userId,
             String bizKey,
             Integer priority,
@@ -113,6 +132,8 @@ public class DemoController {
             Integer executeTimeoutSec,
             Integer retryDelaySec,
             LocalDateTime executeAt,
+            LocalDateTime fallbackCheckAt,
+            Integer maxWaitSec,
             List<TaskDependencyRequest> dependencies,
             String extInfo,
             String payload,

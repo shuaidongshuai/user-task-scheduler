@@ -1,9 +1,11 @@
 package org.dong.scheduler.core.job;
 
 import lombok.extern.slf4j.Slf4j;
+import org.dong.scheduler.config.SchedulerProperties;
 import org.dong.scheduler.core.model.GroupConfig;
 import org.dong.scheduler.core.repo.GroupConfigRepository;
 import org.dong.scheduler.core.service.DispatchService;
+import org.dong.scheduler.core.service.GroupFallbackScanner;
 import org.dong.scheduler.core.service.RecoveryService;
 
 @Slf4j
@@ -13,6 +15,8 @@ public class SchedulerJobs {
     private final DispatchService dispatchService;
     private final RecoveryService recoveryService;
     private final GroupConfigRepository groupConfigRepository;
+    private final GroupFallbackScanner groupFallbackScanner;
+    private final SchedulerProperties properties;
 
     /**
      * 调度任务Jobs
@@ -26,9 +30,26 @@ public class SchedulerJobs {
     public SchedulerJobs(DispatchService dispatchService,
                          RecoveryService recoveryService,
                          GroupConfigRepository groupConfigRepository) {
+        this(dispatchService, recoveryService, groupConfigRepository, null, null);
+    }
+
+    public SchedulerJobs(DispatchService dispatchService,
+                         RecoveryService recoveryService,
+                         GroupConfigRepository groupConfigRepository,
+                         GroupFallbackScanner groupFallbackScanner) {
+        this(dispatchService, recoveryService, groupConfigRepository, groupFallbackScanner, null);
+    }
+
+    public SchedulerJobs(DispatchService dispatchService,
+                         RecoveryService recoveryService,
+                         GroupConfigRepository groupConfigRepository,
+                         GroupFallbackScanner groupFallbackScanner,
+                         SchedulerProperties properties) {
         this.dispatchService = dispatchService;
         this.recoveryService = recoveryService;
         this.groupConfigRepository = groupConfigRepository;
+        this.groupFallbackScanner = groupFallbackScanner;
+        this.properties = properties;
     }
 
     /**
@@ -52,6 +73,20 @@ public class SchedulerJobs {
         } else {
             log.debug("scheduler expire waiting job end, expired=0, costMs={}", System.currentTimeMillis() - begin);
         }
+    }
+
+    public void scanGroupFallback() {
+        if (groupFallbackScanner == null) {
+            return;
+        }
+        String configuredRoute = properties == null ? null : properties.getDispatchRoute();
+        String route = configuredRoute == null || configuredRoute.isBlank() ? "default" : configuredRoute.trim();
+        recoveryService.runWithScheduledJobLock("fallback:" + route, "group fallback scan", () -> {
+            int changed = groupFallbackScanner.scanOnce();
+            if (changed > 0) {
+                log.info("scheduler group fallback scan completed, changed={}", changed);
+            }
+        });
     }
 
     /**

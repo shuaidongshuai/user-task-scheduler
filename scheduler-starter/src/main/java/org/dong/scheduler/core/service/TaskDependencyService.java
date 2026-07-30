@@ -12,5 +12,10 @@ public interface TaskDependencyService {
 
     SchedulerTask refreshTaskAfterSubmit(Long taskId, LocalDateTime now);
 
+    /**
+     * Returns whether a task is still blocked by at least one unsatisfied dependency.
+     */
+    boolean hasUnsatisfiedDependencies(Long taskId);
+
     List<SchedulerTask> onUpstreamTaskTerminal(Long upstreamTaskId, TaskStatus actualStatus, LocalDateTime now);
 }
