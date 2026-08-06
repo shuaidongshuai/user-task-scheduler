@@ -21,6 +21,8 @@ import java.util.concurrent.locks.LockSupport;
 
 @Slf4j
 public class GroupFallbackScanner {
+    private static final long POLICY_EXCEPTION_RETRY_DELAY_MULTIPLIER = 10L;
+
     private final SchedulerProperties properties;
     private final TaskRepository taskRepository;
     private final TaskHandlerRegistry handlerRegistry;
@@ -123,9 +125,14 @@ public class GroupFallbackScanner {
             return 0;
         } catch (Exception ex) {
             Throwable cause = ex.getCause() == null ? ex : ex.getCause();
-            String message = cause.getClass().getSimpleName() + ":" + cause.getMessage();
-            return fallbackService.failWaiting(slot.snapshot(), GroupFallbackService.POLICY_EXCEPTION,
-                    message, LocalDateTime.now(), true).changed() ? 1 : 0;
+            long delayMs = properties.getFallbackMinNextCheckDelayMs() * POLICY_EXCEPTION_RETRY_DELAY_MULTIPLIER;
+            LocalDateTime nextCheckAt = LocalDateTime.now().plusNanos(delayMs * 1_000_000L);
+            log.warn("onGroupWaitTimeout failed; retry fallback check later, taskId={}, taskNo={}, nextCheckAt={}, cause={}",
+                    slot.snapshot().getId(), slot.snapshot().getTaskNo(),
+                    nextCheckAt,
+                    cause.getClass().getSimpleName() + ":" + cause.getMessage());
+            return fallbackService.applyWaitingDecision(slot.snapshot(), GroupFallbackDecision.keepCurrent(nextCheckAt),
+                    LocalDateTime.now()).changed() ? 1 : 0;
         }
         return fallbackService.applyWaitingDecision(
                 slot.snapshot(), decision, LocalDateTime.now()).changed() ? 1 : 0;

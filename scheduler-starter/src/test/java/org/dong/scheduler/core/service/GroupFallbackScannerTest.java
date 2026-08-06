@@ -153,7 +153,7 @@ class GroupFallbackScannerTest {
     }
 
     @Test
-    void shouldFailWhenHandlerThrows() {
+    void shouldRetryFallbackCheckAfterTenTimesMinimumDelayWhenHandlerThrows() {
         SchedulerProperties properties = properties();
         SchedulerTask task = dueTask();
         executor = executor();
@@ -163,15 +163,21 @@ class GroupFallbackScannerTest {
         when(taskRepository.findFallbackDueTaskIds(eq("route-a"), any(LocalDateTime.class), eq(10)))
                 .thenReturn(List.of(1L));
         when(taskRepository.findById(1L)).thenReturn(Optional.of(task));
-        when(fallbackService.failWaiting(eq(task), eq(GroupFallbackService.POLICY_EXCEPTION),
-                any(), any(LocalDateTime.class), eq(true)))
-                .thenReturn(GroupFallbackService.FallbackApplyResult.applied(GroupFallbackAction.FAIL));
+        when(fallbackService.applyWaitingDecision(eq(task), any(GroupFallbackDecision.class),
+                any(LocalDateTime.class)))
+                .thenReturn(GroupFallbackService.FallbackApplyResult.applied(GroupFallbackAction.KEEP_CURRENT));
 
         GroupFallbackScanner scanner = new GroupFallbackScanner(properties, taskRepository,
                 new TaskHandlerRegistry(List.of(throwingHandler)), taskStateService, fallbackService, executor);
 
         assertEquals(1, scanner.scanOnce());
-        verify(fallbackService).failWaiting(eq(task), eq(GroupFallbackService.POLICY_EXCEPTION),
+        verify(fallbackService).applyWaitingDecision(eq(task), org.mockito.ArgumentMatchers.argThat(decision ->
+                        decision.action() == GroupFallbackAction.KEEP_CURRENT
+                                && decision.nextFallbackCheckAt() != null
+                                && decision.nextFallbackCheckAt().isAfter(LocalDateTime.now().plusSeconds(9))
+                                && decision.nextFallbackCheckAt().isBefore(LocalDateTime.now().plusSeconds(11))),
+                any(LocalDateTime.class));
+        verify(fallbackService, never()).failWaiting(eq(task), eq(GroupFallbackService.POLICY_EXCEPTION),
                 any(), any(LocalDateTime.class), eq(true));
     }
 

@@ -64,14 +64,21 @@ utask:
     default-group-heartbeat-timeout-sec: 90
     default-group-lock-expire-sec: 120
     dispatch-interval-ms: 500
-    # 默认开启；设置为 false 可立即停止 fallback 扫描。
+    # 是否开启非运行态 group fallback 扫描；默认 true，false 时仅停用 fallback，不影响正常调度。
     fallback-enabled: true
+    # fallback 扫描周期（毫秒）。
     fallback-scan-interval-ms: 1000
+    # 单次扫描最多处理的到期 fallback 任务数，避免扫描任务占用过久。
     fallback-scan-limit: 200
+    # Handler 返回 keepCurrent/routeTo 的下一次检查时间，距当前时间的最小间隔（毫秒）。
     fallback-min-next-check-delay-ms: 1000
+    # 单次 onGroupWaitTimeout 回调的最长执行时间（毫秒）；超时会终止该任务。
     fallback-policy-timeout-ms: 3000
+    # 执行 onGroupWaitTimeout 回调的独立线程数，避免阻塞调度线程。
     fallback-callback-threads: 4
+    # 回调线程池队列容量；当前必须为 0，使用直接交接并在饱和时延后任务检查。
     fallback-callback-queue-capacity: 0
+    # 回调线程池拒绝任务时，fallback_check_at 延后的时间（毫秒）。
     fallback-executor-reject-backoff-ms: 5000
     recovery-interval-ms: 30000
     queue-refill-interval-ms: 15000
@@ -291,6 +298,8 @@ Handler 可返回：
 
 `RUNNING` 与仍持有并发的 `WAIT_HOLD` 不会触发该回调。回调应快速、无副作用并响应线程中断；
 多实例竞争时回调可能重复计算，但只有符合任务快照的数据库 CAS 能生效。
+若回调抛出异常，框架不会将业务任务置为失败，而是保留当前 group，并在
+`10 × fallback-min-next-check-delay-ms` 后重试 fallback 检查；返回 `null` 或非法决策仍视为接入错误并使任务失败。
 
 ### 执行期重试切换 Group
 
