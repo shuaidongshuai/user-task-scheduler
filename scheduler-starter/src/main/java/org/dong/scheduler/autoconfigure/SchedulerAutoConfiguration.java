@@ -206,11 +206,12 @@ public class SchedulerAutoConfiguration {
                                        RecoveryService recoveryService,
                                        TaskStateService taskStateService,
                                        GroupConfigRepository groupConfigRepository,
+                                       TransactionTemplate transactionTemplate,
                                        @Qualifier("schedulerWorkerExecutor") ThreadPoolTaskExecutor schedulerWorkerExecutor) {
         ensureInstanceId(properties);
         return new WorkerService(properties, taskRepository, handlerRegistry, concurrencyGuard,
                 queueRedisService, recoveryService, schedulerWorkerExecutor, businessTaskStateProviderRegistry,
-                taskStateService, groupConfigRepository);
+                taskStateService, groupConfigRepository, transactionTemplate);
     }
 
     @Bean

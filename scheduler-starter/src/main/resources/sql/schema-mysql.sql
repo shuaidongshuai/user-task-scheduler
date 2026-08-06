@@ -66,14 +66,15 @@ CREATE TABLE IF NOT EXISTS scheduler_task_group_fallback_log (
     task_no VARCHAR(64) NOT NULL COMMENT '任务唯一号',
     source_group_code VARCHAR(64) NOT NULL COMMENT '切组前Group',
     target_group_code VARCHAR(64) NOT NULL COMMENT '切组后Group',
-    previous_fallback_check_at DATETIME NOT NULL COMMENT '本次触发时间',
+    previous_fallback_check_at DATETIME DEFAULT NULL COMMENT '非运行态fallback本次触发时间，执行期切组为空',
     next_fallback_check_at DATETIME DEFAULT NULL COMMENT '下次检查时间',
     task_status VARCHAR(32) NOT NULL COMMENT '切组时任务状态',
+    switch_source VARCHAR(32) NOT NULL DEFAULT 'NON_RUNNING_FALLBACK' COMMENT '切组来源',
     fallback_count INT NOT NULL COMMENT '累计实际切组次数',
     create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     INDEX idx_task_time (task_id, create_time),
     INDEX idx_source_target_time (source_group_code, target_group_code, create_time)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='非运行任务Group切换审计日志';
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Group切换审计日志';
 
 CREATE TABLE IF NOT EXISTS scheduler_task_dependency (
     id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键ID',

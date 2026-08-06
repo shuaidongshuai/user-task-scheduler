@@ -15,6 +15,7 @@ import org.dong.scheduler.core.spi.BusinessTaskStateProvider;
 import org.dong.scheduler.core.spi.TaskHandler;
 import org.dong.scheduler.core.util.ThreadContextUtil;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import jakarta.annotation.PreDestroy;
 
@@ -40,6 +41,7 @@ public class WorkerService {
     private final BusinessTaskStateProviderRegistry businessTaskStateProviderRegistry;
     private final TaskStateService taskStateService;
     private final GroupConfigRepository groupConfigRepository;
+    private final TransactionTemplate transactionTemplate;
 
     public WorkerService(SchedulerProperties properties,
                          TaskRepository taskRepository,
@@ -51,7 +53,7 @@ public class WorkerService {
                          BusinessTaskStateProviderRegistry businessTaskStateProviderRegistry,
                          TaskStateService taskStateService) {
         this(properties, taskRepository, handlerRegistry, concurrencyGuard, queueRedisService, recoveryService,
-                workerExecutor, businessTaskStateProviderRegistry, taskStateService, null);
+                workerExecutor, businessTaskStateProviderRegistry, taskStateService, null, null);
     }
 
     public WorkerService(SchedulerProperties properties,
@@ -64,6 +66,21 @@ public class WorkerService {
                          BusinessTaskStateProviderRegistry businessTaskStateProviderRegistry,
                          TaskStateService taskStateService,
                          GroupConfigRepository groupConfigRepository) {
+        this(properties, taskRepository, handlerRegistry, concurrencyGuard, queueRedisService, recoveryService,
+                workerExecutor, businessTaskStateProviderRegistry, taskStateService, groupConfigRepository, null);
+    }
+
+    public WorkerService(SchedulerProperties properties,
+                         TaskRepository taskRepository,
+                         TaskHandlerRegistry handlerRegistry,
+                         ConcurrencyGuard concurrencyGuard,
+                         QueueRedisService queueRedisService,
+                         RecoveryService recoveryService,
+                         ThreadPoolTaskExecutor workerExecutor,
+                         BusinessTaskStateProviderRegistry businessTaskStateProviderRegistry,
+                         TaskStateService taskStateService,
+                         GroupConfigRepository groupConfigRepository,
+                         TransactionTemplate transactionTemplate) {
         this.properties = properties;
         this.taskRepository = taskRepository;
         this.handlerRegistry = handlerRegistry;
@@ -74,6 +91,7 @@ public class WorkerService {
         this.businessTaskStateProviderRegistry = businessTaskStateProviderRegistry;
         this.taskStateService = taskStateService;
         this.groupConfigRepository = groupConfigRepository;
+        this.transactionTemplate = transactionTemplate;
         int heartbeatThreads = properties.getHeartbeatThreads() > 0
                 ? properties.getHeartbeatThreads()
                 : Math.max(2, properties.getWorkerThreads() / 4);
@@ -357,8 +375,22 @@ public class WorkerService {
                 || groupConfigRepository.findEnabledByGroupCode(targetGroupCode).isEmpty()) {
             return false;
         }
-        return taskRepository.markWaitRetryOnGroup(task.getId(), nextRetry, result.getErrorCode(),
-                result.getErrorMsg(), task.getGroupCode(), targetGroupCode, LocalDateTime.now());
+        Boolean changed;
+        if (transactionTemplate == null) {
+            changed = taskRepository.markWaitRetryOnGroup(task.getId(), nextRetry, result.getErrorCode(),
+                    result.getErrorMsg(), task.getGroupCode(), targetGroupCode, LocalDateTime.now());
+        } else {
+            changed = transactionTemplate.execute(tx -> {
+                boolean applied = taskRepository.markWaitRetryOnGroup(task.getId(), nextRetry, result.getErrorCode(),
+                        result.getErrorMsg(), task.getGroupCode(), targetGroupCode, LocalDateTime.now());
+                if (applied) {
+                    taskRepository.insertExecutionGroupSwitchLog(task, targetGroupCode,
+                            task.getGroupFallbackCount() + 1);
+                }
+                return applied;
+            });
+        }
+        return Boolean.TRUE.equals(changed);
     }
 
     private void removeSourceQueueReferences(SchedulerTask sourceTask) {

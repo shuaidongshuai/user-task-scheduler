@@ -216,7 +216,8 @@ public class JdbcTaskRepository implements TaskRepository {
         return jdbcTemplate.update("""
                 update scheduler_task
                    set status='WAIT_RETRY', group_code=?, retry_count=retry_count+1, next_retry_at=?, execute_at=?,
-                       error_code=?, error_msg=?, update_time=now(), version=version+1
+                       error_code=?, error_msg=?, group_fallback_count=group_fallback_count+1,
+                       update_time=now(), version=version+1
                  where id=? and status='RUNNING' and group_code=?
                 """, targetGroupCode, Timestamp.valueOf(nextRetryAt), Timestamp.valueOf(nextRetryAt),
                 errorCode, errorMsg, id, sourceGroupCode) > 0;
@@ -460,10 +461,22 @@ public class JdbcTaskRepository implements TaskRepository {
         jdbcTemplate.update("""
                 insert into scheduler_task_group_fallback_log(
                     task_id, task_no, source_group_code, target_group_code,
-                    previous_fallback_check_at, next_fallback_check_at, task_status, fallback_count
-                ) values(?,?,?,?,?,?,?,?)
+                    previous_fallback_check_at, next_fallback_check_at, task_status, switch_source, fallback_count
+                ) values(?,?,?,?,?,?,?,?,?)
                 """, snapshot.getId(), snapshot.getTaskNo(), snapshot.getGroupCode(), targetGroupCode,
-                timestamp(snapshot.getFallbackCheckAt()), timestamp(nextCheckAt), snapshot.getStatus().name(), fallbackCount);
+                timestamp(snapshot.getFallbackCheckAt()), timestamp(nextCheckAt), snapshot.getStatus().name(),
+                "NON_RUNNING_FALLBACK", fallbackCount);
+    }
+
+    @Override
+    public void insertExecutionGroupSwitchLog(SchedulerTask snapshot, String targetGroupCode, int fallbackCount) {
+        jdbcTemplate.update("""
+                insert into scheduler_task_group_fallback_log(
+                    task_id, task_no, source_group_code, target_group_code,
+                    previous_fallback_check_at, next_fallback_check_at, task_status, switch_source, fallback_count
+                ) values(?,?,?,?,?,?,?,?,?)
+                """, snapshot.getId(), snapshot.getTaskNo(), snapshot.getGroupCode(), targetGroupCode,
+                null, null, snapshot.getStatus().name(), "EXECUTION_RETRY", fallbackCount);
     }
 
     @Override

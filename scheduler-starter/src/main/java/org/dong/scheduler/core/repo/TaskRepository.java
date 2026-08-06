@@ -74,6 +74,8 @@ public interface TaskRepository {
     void insertGroupFallbackLog(SchedulerTask snapshot, String targetGroupCode,
                                 LocalDateTime nextCheckAt, int fallbackCount);
 
+    void insertExecutionGroupSwitchLog(SchedulerTask snapshot, String targetGroupCode, int fallbackCount);
+
     void promotePendingToRunnable(String dispatchRoute, LocalDateTime now, int limit);
 
     boolean markRunnableIfPending(Long id, LocalDateTime now);

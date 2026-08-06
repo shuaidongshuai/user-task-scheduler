@@ -1,4 +1,4 @@
-# UTask 非运行态动态 Group 降级技术方案
+# UTask 动态 Group 降级技术方案
 
 ## 2026-07-23 11:08
 
@@ -176,15 +176,16 @@ create table scheduler_task_group_fallback_log (
     task_no varchar(64) not null comment '原调度任务唯一号；切组不会创建新taskNo',
     source_group_code varchar(64) not null comment '切组前任务排队所属groupCode',
     target_group_code varchar(64) not null comment '切组后任务排队所属groupCode；必须与source_group_code不同',
-    previous_fallback_check_at datetime not null comment '触发本次策略调用的原fallbackCheckAt',
+    previous_fallback_check_at datetime null comment '非运行态触发本次策略调用的原fallbackCheckAt；执行期切组为空',
     next_fallback_check_at datetime null comment '切组后下一次策略检查绝对时间；为空表示停止检查',
     task_status varchar(32) not null comment '切组发生时任务状态：PENDING/RUNNABLE/WAIT_RETRY',
+    switch_source varchar(32) not null default 'NON_RUNNING_FALLBACK' comment '切组来源',
     fallback_count int not null comment '本次成功后累计实际切组次数',
     create_time datetime not null default current_timestamp comment '数据库切组成功时间',
     index idx_task_time(task_id, create_time),
     index idx_source_target_time(source_group_code, target_group_code, create_time)
 ) engine=InnoDB default charset=utf8mb4
-  comment='非运行任务Group实际切换审计日志；每次成功从一个Group切换到另一个Group记录一行，不记录KEEP_CURRENT、STOP_CHECKING、FAIL、策略异常或未通过CAS的决策';
+  comment='Group实际切换审计日志；每次成功从一个Group切换到另一个Group记录一行';
 ```
 
 任务主表 CAS 更新和日志插入必须位于同一数据库事务中。该表不需要 executeNo：降级发生时任务未在执行。上线前必须对 `dispatch_route is null` 和非空 route 两类扫描 SQL 执行 MySQL `EXPLAIN`，确认命中复合索引；若 `<=>` 在目标 MySQL 版本无法得到稳定计划，Repository 按 null/非 null 拆成两条 SQL。
