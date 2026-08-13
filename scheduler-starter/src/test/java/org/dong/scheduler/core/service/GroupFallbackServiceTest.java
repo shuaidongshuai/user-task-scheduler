@@ -167,24 +167,19 @@ class GroupFallbackServiceTest {
     }
 
     @Test
-    void shouldFailAndPropagateDependenciesForInvalidDecision() {
+    void shouldStopFallbackWithoutChangingTaskStateForInvalidDecision() {
         LocalDateTime now = LocalDateTime.now();
         SchedulerTask source = waitingTask(now);
-        SchedulerTask downstream = waitingTask(now);
-        downstream.setId(2L);
-        when(taskRepository.casFallbackWaitingToFailed(
-                eq(source), eq(GroupFallbackService.DECISION_INVALID), any(), eq(now), eq(true)))
+        when(taskRepository.casUpdateFallbackCheck(source, null, now, true))
                 .thenReturn(true);
-        when(taskDependencyService.onUpstreamTaskTerminal(1L, TaskStatus.FAILED, now))
-                .thenReturn(List.of(downstream));
 
         GroupFallbackService.FallbackApplyResult result = service.applyWaitingDecision(
                 source, GroupFallbackDecision.keepCurrent(now), now);
 
         assertTrue(result.changed());
-        verify(queueRedisService).removeQueueReferences(source);
-        verify(queueRedisService).enqueueReady(downstream);
-        verify(taskRepository, never()).casUpdateFallbackCheck(eq(source), any(), eq(now), eq(true));
+        assertEquals(GroupFallbackAction.STOP_CHECKING, result.action());
+        verify(taskRepository).casUpdateFallbackCheck(source, null, now, true);
+        verify(taskDependencyService, never()).onUpstreamTaskTerminal(any(), any(), any());
     }
 
     @Test
@@ -203,25 +198,19 @@ class GroupFallbackServiceTest {
 
     @ParameterizedTest(name = "{0}")
     @MethodSource("invalidDecisions")
-    void shouldFailEveryInvalidDecisionCombination(String scenario,
+    void shouldStopFallbackForEveryInvalidDecisionCombination(String scenario,
                                                    GroupFallbackDecision decision,
                                                    String expectedErrorCode) {
         LocalDateTime now = LocalDateTime.now();
         SchedulerTask source = waitingTask(now);
-        when(taskRepository.casFallbackWaitingToFailed(
-                eq(source), eq(expectedErrorCode), any(), eq(now), eq(true)))
-                .thenReturn(true);
-        when(taskDependencyService.onUpstreamTaskTerminal(1L, TaskStatus.FAILED, now))
-                .thenReturn(List.of());
+        when(taskRepository.casUpdateFallbackCheck(source, null, now, true)).thenReturn(true);
 
         GroupFallbackService.FallbackApplyResult result = service.applyWaitingDecision(source, decision, now);
 
         assertTrue(result.changed(), scenario);
-        assertEquals(GroupFallbackAction.FAIL, result.action());
-        verify(taskRepository).casFallbackWaitingToFailed(
-                eq(source), eq(expectedErrorCode), any(), eq(now), eq(true));
+        assertEquals(GroupFallbackAction.STOP_CHECKING, result.action());
+        verify(taskRepository).casUpdateFallbackCheck(source, null, now, true);
         verify(taskRepository, never()).casRouteFallback(any(), any(), any(), any());
-        verify(taskRepository, never()).casUpdateFallbackCheck(any(), any(), any(), eq(true));
     }
 
     @Test
@@ -229,36 +218,27 @@ class GroupFallbackServiceTest {
         LocalDateTime now = LocalDateTime.now();
         SchedulerTask source = waitingTask(now);
         when(groupConfigRepository.findEnabledByGroupCode("missing")).thenReturn(Optional.empty());
-        when(taskRepository.casFallbackWaitingToFailed(
-                eq(source), eq(GroupFallbackService.TARGET_DISABLED), any(), eq(now), eq(true)))
-                .thenReturn(true);
-        when(taskDependencyService.onUpstreamTaskTerminal(1L, TaskStatus.FAILED, now))
-                .thenReturn(List.of());
+        when(taskRepository.casUpdateFallbackCheck(source, null, now, true)).thenReturn(true);
 
         GroupFallbackService.FallbackApplyResult result = service.applyWaitingDecision(
                 source, GroupFallbackDecision.routeTo("missing", null), now);
 
         assertTrue(result.changed());
-        verify(taskRepository).casFallbackWaitingToFailed(
-                eq(source), eq(GroupFallbackService.TARGET_DISABLED), any(), eq(now), eq(true));
+        verify(taskRepository).casUpdateFallbackCheck(source, null, now, true);
     }
 
     @Test
-    void shouldTruncateExplicitFailureMessageToDatabaseLimit() {
+    void shouldStopFallbackForExplicitFailureDecisionWithoutChangingTaskState() {
         LocalDateTime now = LocalDateTime.now();
         SchedulerTask source = waitingTask(now);
         String longMessage = "x".repeat(1500);
-        when(taskRepository.casFallbackWaitingToFailed(
-                eq(source), eq("BUSINESS_FAIL"), any(), eq(now), eq(true)))
-                .thenReturn(true);
-        when(taskDependencyService.onUpstreamTaskTerminal(1L, TaskStatus.FAILED, now))
-                .thenReturn(List.of());
+        when(taskRepository.casUpdateFallbackCheck(source, null, now, true)).thenReturn(true);
 
         service.applyWaitingDecision(
                 source, GroupFallbackDecision.fail(" BUSINESS_FAIL ", longMessage), now);
 
-        verify(taskRepository).casFallbackWaitingToFailed(
-                eq(source), eq("BUSINESS_FAIL"), eq("x".repeat(1024)), eq(now), eq(true));
+        verify(taskRepository).casUpdateFallbackCheck(source, null, now, true);
+        verify(taskDependencyService, never()).onUpstreamTaskTerminal(any(), any(), any());
     }
 
     private static Stream<Arguments> invalidDecisions() {

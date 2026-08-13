@@ -206,14 +206,14 @@ FallbackApplyResult applyWaitingDecision(
 1. 检查任务硬截止时间。
 2. 校验状态、决策、目标 Group 和下一次检查时间。
 3. `ROUTE/KEEP_CURRENT/STOP_CHECKING` 执行带快照条件的 CAS；`ROUTE` 在同一事务写切组日志。
-4. `FAIL`、Handler 缺失、非法决策、回调异常/超时通过带快照条件的终态 CAS 失败任务，并在同一数据库事务内调用 `TaskDependencyService.onUpstreamTaskTerminal`。
+4. `FAIL`、Handler 缺失、非法决策、回调超时通过带快照条件的 `fallbackCheckAt=null` CAS 停止后续降级检查，不改变任务状态，也不传播下游依赖终态；回调异常则退避后重试。
 5. executor 在 Handler 开始前拒绝时，执行带快照条件的非终态退避 CAS，仅推迟 `fallbackCheckAt`，不增加策略次数、不修改 Group/status。
 6. 硬截止时间到期时复用增强后的 `TaskStateService.markFailedByWaitDeadline`：在事务内锁定实际终态迁移前快照，由方法内部保留该快照供提交后清理，同时完成依赖传播，不另写宽松失败流程。
-7. 事务提交后使用实际发生迁移前的快照精确清理 Group 队列引用；终态分支也必须清理。
-8. 非终态决策根据数据库新快照和状态写入新 Group 队列；终态决策入队依赖传播产生的下游任务。
+7. 事务提交后仅对成功切组的任务使用实际发生迁移前的快照精确清理 Group 队列引用。
+8. 切组决策根据数据库新快照和状态写入新 Group 队列；停止检查和退避不改变队列引用。
 9. 输出统一日志、指标和错误码。
 
-终态 CAS 必须使用与 ROUTE 相同的 `id + waiting status + groupCode + fallbackCheckAt + version` 快照条件，同时清空 `fallback_check_at`。禁止直接复用可以更新 `RUNNING` 的通用 `markFailed`，避免 Handler 返回前 Dispatcher 已启动任务时误杀运行任务。
+停止 fallback 的 CAS 必须使用与 ROUTE 相同的 `id + waiting status + groupCode + fallbackCheckAt + version` 快照条件，同时清空 `fallback_check_at`。禁止复用可更新任务状态的通用失败方法，避免降级通知影响实际业务执行。
 
 硬超时使用如下统一终态编排，fallback scan 和现有 wait-timeout job 只调用该方法：
 
@@ -264,7 +264,7 @@ fallback scan 使用专用 `fallbackTaskScheduler`，不与 dispatch、wait-time
 1. 从本批 ID 中填充最多 `fallbackCallbackThreads` 个 in-flight 槽位，同一实例内用 taskId 去重。
 2. 每个 Callable 在真正进入 Handler 前写入 `startedAt`，超时从 `startedAt` 计算，不从查询或提交 executor 时计算。
 3. 控制器收集已完成结果；完成一个即释放槽位并从本批补充一个，直到本批处理完毕。
-4. `now - startedAt >= fallbackPolicyTimeoutMs` 时调用 `Future.cancel(true)` 并走回调超时终态 CAS；Handler 必须响应中断。
+4. `now - startedAt >= fallbackPolicyTimeoutMs` 时调用 `Future.cancel(true)` 并停止后续 fallback 检查；Handler 必须响应中断。该操作不改变任务状态。
 5. 如果 Handler 忽略中断，对应 executor 线程可能继续被占用；后续新任务提交被拒绝时仅做非终态退避，不占用 Worker executor，不失败业务任务。
 
 在 Handler 正常响应中断的最坏情况下，一批最长回调耗时约为 `ceil(fallbackScanLimit / fallbackCallbackThreads) * fallbackPolicyTimeoutMs`；默认配置下约 150 秒，不再是串行处理的 600 秒。跨实例重复计算仍依赖快照 CAS 保证单次生效。
@@ -289,9 +289,9 @@ update scheduler_task
 
 `KEEP_CURRENT` 与 `STOP_CHECKING` 使用相同条件，仅更新 `fallbackPolicyCount/fallbackCheckAt/version`，不增加 `groupFallbackCount`、不写切组日志、不移动队列。
 
-`FAIL` 及策略错误使用专用 `casFallbackWaitingToFailed` SQL，条件与上述 CAS 一致，更新 `status='FAILED'`、`finish_time`、`error_code/error_msg`、`fallback_check_at=null`和 `version`。该 CAS 与下游依赖状态更新必须位于同一 `TransactionTemplate` 事务中；CAS miss 不得传播终态或清理 Redis。
+`FAIL` 及策略错误仅使用 `casUpdateFallbackCheck(snapshot, null, now, ...)` 清空 `fallback_check_at`，停止后续降级检查；不更新任务状态、不传播下游依赖终态，也不清理 Redis。`FAIL` 名称为兼容既有决策 API 保留，其语义是停止 fallback，而非业务失败。
 
-`fallbackPolicyCount` 只在 Handler 确实开始调用且本次决策/策略错误 CAS 成功落库时增加。Handler 缺失或 executor 在回调开始前拒绝时不增加；回调超时、抛异常或返回非法决策且终态 CAS 成功时增加。
+`fallbackPolicyCount` 只在 Handler 确实开始调用且本次决策/策略错误 CAS 成功落库时增加。Handler 缺失或 executor 在回调开始前拒绝时不增加；回调超时或返回非法决策且停止 fallback 的 CAS 成功时增加。
 
 executor 拒绝使用专用 `deferFallbackAfterExecutorReject` CAS：
 
@@ -425,8 +425,8 @@ Fallback scan 使用独立分布式 job lock，锁名包含规范化后的 `disp
 | 新模型 | GroupFallbackDecision、GroupFallbackAction |
 | `TaskRepository` / `JdbcTaskRepository` | 扫描、策略 CAS、切组日志写入、增强 casToRunning 条件 |
 | `GroupConfigRepository` | 复用 findEnabledByGroupCode 校验目标 Group |
-| 新 `GroupFallbackService` | 校验、切组/终态 CAS、依赖传播事务和事后队列处理 |
-| `TaskStateService` / `TaskDependencyService` | 硬超时事务内锁定实际快照并清理队列，为 fallback 条件终态 CAS 提供依赖传播编排 |
+| 新 `GroupFallbackService` | 校验、切组/停止检查 CAS 和事后队列处理 |
+| `TaskStateService` / `TaskDependencyService` | 硬超时事务内锁定实际快照、传播依赖终态并清理队列 |
 | `SchedulerJobs` / `SchedulerJobRunner` | 增加 fallback scan 定时任务和 route 锁 |
 | `SchedulerAutoConfiguration` | 提供独立有界 fallback callback executor 和专用 TaskScheduler |
 | `DispatchService` | 传入 expected group/version，校验 DB Group 与队列 Group |
@@ -448,7 +448,7 @@ Fallback scan 使用独立分布式 job lock，锁名包含规范化后的 `disp
 
 1. 实现按 route 的到期扫描和定时任务。
 2. 实现 Handler 固定并发槽位隔离回调、开始时超时计时、拒绝非终态退避、决策校验、事务 CAS 和日志。
-3. 实现 fallback 条件终态 CAS，并在同一事务内传播下游依赖。
+3. 实现 fallback 条件停止检查 CAS，确保不修改任务状态或传播下游依赖。
 4. 增强 Dispatcher `casToRunning` 的 expected group/version 条件。
 
 ### 阶段三：Redis 迁移与恢复
@@ -479,12 +479,12 @@ Fallback scan 使用独立分布式 job lock，锁名包含规范化后的 `disp
 
 - 两实例同时扫描：Handler 可被重复计算，但只有一次 CAS/日志/切组生效。
 - Dispatcher 与降级竞争：两种 CAS 只有一个成功；失败方正确清理已取得资源。
-- Handler 回调期间 Dispatcher 先置 RUNNING：fallback 终态 CAS 失败，不得误杀运行任务。
+- Handler 回调期间 Dispatcher 先置 RUNNING：fallback 停止检查 CAS 失败，不得影响运行任务。
 - A 的 ready 队列读到 DB 已属于 B 的任务：只删 A 成员，不删 B 成员，不预占 A 并发。
 - 目标 Group 用户并发已满：任务保留在目标队列，待容量释放后执行。
 - 同一用户其他 RUNNING 任务的计数不受切组影响。
 - DB 切组后 Redis 写入失败：queue refill 最终恢复到新 Group。
-- Handler 永不返回：超时后任务按明确错误码走条件终态 CAS，dispatch/recovery/refill 不受阻塞。
+- Handler 永不返回：超时后仅停止该任务后续 fallback 检查，dispatch/recovery/refill 不受阻塞。
 - Handler 忽略中断并占满 fallback executor：后续任务只退避 `fallbackCheckAt`，不增加策略次数，不进入业务终态。
 - 并发槽位：同时运行回调不超过 `fallbackCallbackThreads`，timeout 从 Handler 实际 `startedAt` 计算，不从提交时计算。
 

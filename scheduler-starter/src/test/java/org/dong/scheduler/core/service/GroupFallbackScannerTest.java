@@ -91,7 +91,7 @@ class GroupFallbackScannerTest {
     }
 
     @Test
-    void shouldCancelTimedOutCallbackAndFailWithSnapshotCas() {
+    void shouldCancelTimedOutCallbackAndStopFallbackWithSnapshotCas() {
         SchedulerProperties properties = properties();
         properties.setFallbackPolicyTimeoutMs(20);
         SchedulerTask task = dueTask();
@@ -120,35 +120,35 @@ class GroupFallbackScannerTest {
         when(taskRepository.findFallbackDueTaskIds(eq("route-a"), any(LocalDateTime.class), eq(10)))
                 .thenReturn(List.of(1L));
         when(taskRepository.findById(1L)).thenReturn(Optional.of(task));
-        when(fallbackService.failWaiting(eq(task), eq(GroupFallbackService.POLICY_TIMEOUT),
+        when(fallbackService.stopWaitingFallback(eq(task), eq(GroupFallbackService.POLICY_TIMEOUT),
                 any(), any(LocalDateTime.class), eq(true)))
-                .thenReturn(GroupFallbackService.FallbackApplyResult.applied(GroupFallbackAction.FAIL));
+                .thenReturn(GroupFallbackService.FallbackApplyResult.applied(GroupFallbackAction.STOP_CHECKING));
 
         GroupFallbackScanner scanner = new GroupFallbackScanner(properties, taskRepository,
                 new TaskHandlerRegistry(List.of(handler)), taskStateService, fallbackService, executor);
 
         assertEquals(1, scanner.scanOnce());
-        verify(fallbackService).failWaiting(eq(task), eq(GroupFallbackService.POLICY_TIMEOUT),
+        verify(fallbackService).stopWaitingFallback(eq(task), eq(GroupFallbackService.POLICY_TIMEOUT),
                 any(), any(LocalDateTime.class), eq(true));
     }
 
     @Test
-    void shouldFailWithoutPolicyCountWhenHandlerIsMissing() {
+    void shouldStopFallbackWithoutPolicyCountWhenHandlerIsMissing() {
         SchedulerProperties properties = properties();
         SchedulerTask task = dueTask();
         executor = executor();
         when(taskRepository.findFallbackDueTaskIds(eq("route-a"), any(LocalDateTime.class), eq(10)))
                 .thenReturn(List.of(1L));
         when(taskRepository.findById(1L)).thenReturn(Optional.of(task));
-        when(fallbackService.failWaiting(eq(task), eq(GroupFallbackService.HANDLER_NOT_FOUND),
+        when(fallbackService.stopWaitingFallback(eq(task), eq(GroupFallbackService.HANDLER_NOT_FOUND),
                 any(), any(LocalDateTime.class), eq(false)))
-                .thenReturn(GroupFallbackService.FallbackApplyResult.applied(GroupFallbackAction.FAIL));
+                .thenReturn(GroupFallbackService.FallbackApplyResult.applied(GroupFallbackAction.STOP_CHECKING));
 
         GroupFallbackScanner scanner = new GroupFallbackScanner(properties, taskRepository,
                 new TaskHandlerRegistry(List.of()), taskStateService, fallbackService, executor);
 
         assertEquals(1, scanner.scanOnce());
-        verify(fallbackService).failWaiting(eq(task), eq(GroupFallbackService.HANDLER_NOT_FOUND),
+        verify(fallbackService).stopWaitingFallback(eq(task), eq(GroupFallbackService.HANDLER_NOT_FOUND),
                 any(), any(LocalDateTime.class), eq(false));
     }
 
@@ -177,7 +177,7 @@ class GroupFallbackScannerTest {
                                 && decision.nextFallbackCheckAt().isAfter(LocalDateTime.now().plusSeconds(9))
                                 && decision.nextFallbackCheckAt().isBefore(LocalDateTime.now().plusSeconds(11))),
                 any(LocalDateTime.class));
-        verify(fallbackService, never()).failWaiting(eq(task), eq(GroupFallbackService.POLICY_EXCEPTION),
+        verify(fallbackService, never()).stopWaitingFallback(eq(task), eq(GroupFallbackService.POLICY_EXCEPTION),
                 any(), any(LocalDateTime.class), eq(true));
     }
 
@@ -228,9 +228,9 @@ class GroupFallbackScannerTest {
                 .thenReturn(List.of(1L, 2L));
         when(taskRepository.findById(1L)).thenReturn(Optional.of(first));
         when(taskRepository.findById(2L)).thenReturn(Optional.of(second));
-        when(fallbackService.failWaiting(eq(first), eq(GroupFallbackService.POLICY_TIMEOUT),
+        when(fallbackService.stopWaitingFallback(eq(first), eq(GroupFallbackService.POLICY_TIMEOUT),
                 any(), any(LocalDateTime.class), eq(true)))
-                .thenReturn(GroupFallbackService.FallbackApplyResult.applied(GroupFallbackAction.FAIL));
+                .thenReturn(GroupFallbackService.FallbackApplyResult.applied(GroupFallbackAction.STOP_CHECKING));
         when(fallbackService.deferAfterExecutorReject(eq(second), any(LocalDateTime.class)))
                 .thenReturn(GroupFallbackService.FallbackApplyResult.deferredResult());
 
@@ -240,7 +240,7 @@ class GroupFallbackScannerTest {
 
             assertEquals(1, scanner.scanOnce());
             assertEquals(true, firstStarted.get());
-            verify(fallbackService).failWaiting(eq(first), eq(GroupFallbackService.POLICY_TIMEOUT),
+            verify(fallbackService).stopWaitingFallback(eq(first), eq(GroupFallbackService.POLICY_TIMEOUT),
                     any(), any(LocalDateTime.class), eq(true));
             verify(fallbackService).deferAfterExecutorReject(eq(second), any(LocalDateTime.class));
             verify(fallbackService, never()).applyWaitingDecision(eq(second), any(), any());

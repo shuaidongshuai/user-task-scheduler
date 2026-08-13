@@ -38,7 +38,8 @@ public interface TaskRepository {
     boolean markWaitRetry(Long id, LocalDateTime nextRetryAt, String errorCode, String errorMsg, LocalDateTime now);
 
     boolean markWaitRetryOnGroup(Long id, LocalDateTime nextRetryAt, String errorCode, String errorMsg,
-                                 String sourceGroupCode, String targetGroupCode, LocalDateTime now);
+                                 String sourceGroupCode, String targetGroupCode, LocalDateTime nextFallbackCheckAt,
+                                 LocalDateTime now);
 
     boolean markWaitHold(Long id, LocalDateTime nextExecuteAt, String extInfo, LocalDateTime now);
 
@@ -67,9 +68,6 @@ public interface TaskRepository {
 
     boolean casUpdateFallbackCheck(SchedulerTask snapshot, LocalDateTime nextCheckAt, LocalDateTime now,
                                    boolean incrementPolicyCount);
-
-    boolean casFallbackWaitingToFailed(SchedulerTask snapshot, String errorCode, String errorMsg,
-                                       LocalDateTime now, boolean incrementPolicyCount);
 
     void insertGroupFallbackLog(SchedulerTask snapshot, String targetGroupCode,
                                 LocalDateTime nextCheckAt, int fallbackCount);

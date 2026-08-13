@@ -67,7 +67,7 @@ public class GroupFallbackScanner {
                 }
                 TaskHandler handler = handlerRegistry.find(snapshot.getBizType());
                 if (handler == null) {
-                    if (fallbackService.failWaiting(snapshot, GroupFallbackService.HANDLER_NOT_FOUND,
+                    if (fallbackService.stopWaitingFallback(snapshot, GroupFallbackService.HANDLER_NOT_FOUND,
                             "TaskHandler not found for bizType=" + snapshot.getBizType(),
                             LocalDateTime.now(), false).changed()) {
                         changed++;
@@ -100,7 +100,7 @@ public class GroupFallbackScanner {
                 long elapsedMs = startedAt == 0L ? 0L : (System.nanoTime() - startedAt) / 1_000_000L;
                 if (startedAt != 0L && elapsedMs >= properties.getFallbackPolicyTimeoutMs()) {
                     slot.future().cancel(true);
-                    if (fallbackService.failWaiting(slot.snapshot(), GroupFallbackService.POLICY_TIMEOUT,
+                    if (fallbackService.stopWaitingFallback(slot.snapshot(), GroupFallbackService.POLICY_TIMEOUT,
                             "onGroupWaitTimeout exceeded " + properties.getFallbackPolicyTimeoutMs() + "ms",
                             LocalDateTime.now(), true).changed()) {
                         changed++;

@@ -27,6 +27,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.verify;
@@ -318,10 +319,10 @@ class WorkerServiceReleaseMismatchTest {
         target.setEnabled(true);
         when(taskHandler.bizTypes()).thenReturn(List.of("demo.biz"));
         when(taskHandler.execute(any(SchedulerTask.class)))
-                .thenReturn(TaskExecuteResult.retryableOnGroup("TEMPORARY", "try target group", "g2"));
+                .thenReturn(TaskExecuteResult.retryableOnGroup("TEMPORARY", "try target group", "g2", null));
         when(groupConfigRepository.findEnabledByGroupCode("g2")).thenReturn(Optional.of(target));
         when(taskRepository.markWaitRetryOnGroup(eq(1L), any(LocalDateTime.class), eq("TEMPORARY"),
-                eq("try target group"), eq("g1"), eq("g2"), any(LocalDateTime.class))).thenReturn(true);
+                eq("try target group"), eq("g1"), eq("g2"), isNull(), any(LocalDateTime.class))).thenReturn(true);
         when(taskRepository.findById(1L)).thenReturn(Optional.of(rescheduled));
         when(concurrencyGuard.release("g1", "u1", 1L, "exec-switch")).thenReturn(true);
 
@@ -345,7 +346,7 @@ class WorkerServiceReleaseMismatchTest {
         workerService.executeDirect(task, source, "exec-switch");
 
         verify(taskRepository).markWaitRetryOnGroup(eq(1L), any(LocalDateTime.class), eq("TEMPORARY"),
-                eq("try target group"), eq("g1"), eq("g2"), any(LocalDateTime.class));
+                eq("try target group"), eq("g1"), eq("g2"), isNull(), any(LocalDateTime.class));
         verify(taskRepository, never()).markWaitRetry(eq(1L), any(LocalDateTime.class), anyString(),
                 anyString(), any(LocalDateTime.class));
         org.mockito.InOrder queueOrder = inOrder(queueRedisService);

@@ -12,7 +12,6 @@ import org.dong.scheduler.core.repo.TaskRepository;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.LocalDateTime;
-import java.util.List;
 
 @Slf4j
 public class GroupFallbackService {
@@ -53,11 +52,11 @@ public class GroupFallbackService {
                                                      LocalDateTime now) {
         Validation validation = validate(snapshot, decision, now);
         if (!validation.valid()) {
-            return failWaiting(snapshot, validation.errorCode(), validation.errorMessage(), now, true);
+            return stopWaitingFallback(snapshot, validation.errorCode(), validation.errorMessage(), now, true);
         }
         GroupFallbackAction action = decision.action();
         if (action == GroupFallbackAction.FAIL) {
-            return failWaiting(snapshot, normalizeErrorCode(decision.errorCode()),
+            return stopWaitingFallback(snapshot, normalizeErrorCode(decision.errorCode()),
                     truncate(decision.errorMessage(), MAX_ERROR_MESSAGE_LENGTH), now, true);
         }
         if (action == GroupFallbackAction.ROUTE) {
@@ -87,27 +86,16 @@ public class GroupFallbackService {
         return changed ? FallbackApplyResult.applied(action) : FallbackApplyResult.casMiss(action);
     }
 
-    public FallbackApplyResult failWaiting(SchedulerTask snapshot, String errorCode, String errorMessage,
-                                           LocalDateTime now, boolean incrementPolicyCount) {
-        TerminalResult result = transactionTemplate.execute(tx -> {
-            boolean changed = taskRepository.casFallbackWaitingToFailed(
-                    snapshot, normalizeErrorCode(errorCode), truncate(errorMessage, MAX_ERROR_MESSAGE_LENGTH),
-                    now, incrementPolicyCount);
-            if (!changed) {
-                return new TerminalResult(false, List.of());
-            }
-            List<SchedulerTask> downstream = taskDependencyService.onUpstreamTaskTerminal(
-                    snapshot.getId(), TaskStatus.FAILED, now);
-            return new TerminalResult(true, downstream);
-        });
-        if (result == null || !result.changed()) {
-            return FallbackApplyResult.casMiss(GroupFallbackAction.FAIL);
+    public FallbackApplyResult stopWaitingFallback(SchedulerTask snapshot, String reasonCode, String reasonMessage,
+                                                    LocalDateTime now, boolean incrementPolicyCount) {
+        boolean changed = taskRepository.casUpdateFallbackCheck(snapshot, null, now, incrementPolicyCount);
+        if (!changed) {
+            return FallbackApplyResult.casMiss(GroupFallbackAction.STOP_CHECKING);
         }
-        removeQueueReferencesSafely(snapshot);
-        result.downstream().forEach(this::enqueueWaitingTaskSafely);
-        log.warn("task fallback policy failed task, taskId={}, taskNo={}, group={}, errorCode={}",
-                snapshot.getId(), snapshot.getTaskNo(), snapshot.getGroupCode(), errorCode);
-        return FallbackApplyResult.applied(GroupFallbackAction.FAIL);
+        log.warn("task fallback check stopped, taskId={}, taskNo={}, group={}, reasonCode={}, reasonMessage={}",
+                snapshot.getId(), snapshot.getTaskNo(), snapshot.getGroupCode(), normalizeErrorCode(reasonCode),
+                truncate(reasonMessage, MAX_ERROR_MESSAGE_LENGTH));
+        return FallbackApplyResult.applied(GroupFallbackAction.STOP_CHECKING);
     }
 
     public FallbackApplyResult deferAfterExecutorReject(SchedulerTask snapshot, LocalDateTime now) {
@@ -250,6 +238,4 @@ public class GroupFallbackService {
         }
     }
 
-    private record TerminalResult(boolean changed, List<SchedulerTask> downstream) {
-    }
 }

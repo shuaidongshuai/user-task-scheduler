@@ -378,11 +378,13 @@ public class WorkerService {
         Boolean changed;
         if (transactionTemplate == null) {
             changed = taskRepository.markWaitRetryOnGroup(task.getId(), nextRetry, result.getErrorCode(),
-                    result.getErrorMsg(), task.getGroupCode(), targetGroupCode, LocalDateTime.now());
+                    result.getErrorMsg(), task.getGroupCode(), targetGroupCode, result.getNextFallbackCheckAt(),
+                    LocalDateTime.now());
         } else {
             changed = transactionTemplate.execute(tx -> {
                 boolean applied = taskRepository.markWaitRetryOnGroup(task.getId(), nextRetry, result.getErrorCode(),
-                        result.getErrorMsg(), task.getGroupCode(), targetGroupCode, LocalDateTime.now());
+                        result.getErrorMsg(), task.getGroupCode(), targetGroupCode, result.getNextFallbackCheckAt(),
+                        LocalDateTime.now());
                 if (applied) {
                     taskRepository.insertExecutionGroupSwitchLog(task, targetGroupCode,
                             task.getGroupFallbackCount() + 1);

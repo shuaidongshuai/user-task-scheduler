@@ -212,15 +212,17 @@ public class JdbcTaskRepository implements TaskRepository {
 
     @Override
     public boolean markWaitRetryOnGroup(Long id, LocalDateTime nextRetryAt, String errorCode, String errorMsg,
-                                        String sourceGroupCode, String targetGroupCode, LocalDateTime now) {
+                                        String sourceGroupCode, String targetGroupCode, LocalDateTime nextFallbackCheckAt,
+                                        LocalDateTime now) {
         return jdbcTemplate.update("""
                 update scheduler_task
                    set status='WAIT_RETRY', group_code=?, retry_count=retry_count+1, next_retry_at=?, execute_at=?,
                        error_code=?, error_msg=?, group_fallback_count=group_fallback_count+1,
+                       fallback_check_at=?,
                        update_time=now(), version=version+1
                  where id=? and status='RUNNING' and group_code=?
                 """, targetGroupCode, Timestamp.valueOf(nextRetryAt), Timestamp.valueOf(nextRetryAt),
-                errorCode, errorMsg, id, sourceGroupCode) > 0;
+                errorCode, errorMsg, timestamp(nextFallbackCheckAt), id, sourceGroupCode) > 0;
     }
 
     @Override
@@ -437,22 +439,6 @@ public class JdbcTaskRepository implements TaskRepository {
                 timestamp(nextCheckAt), Timestamp.valueOf(now), snapshot.getId(), snapshot.getStatus().name(),
                 snapshot.getGroupCode(), timestamp(snapshot.getFallbackCheckAt()), snapshot.getVersion(),
                 Timestamp.valueOf(now)) > 0;
-    }
-
-    @Override
-    public boolean casFallbackWaitingToFailed(SchedulerTask snapshot, String errorCode, String errorMsg,
-                                              LocalDateTime now, boolean incrementPolicyCount) {
-        String countUpdate = incrementPolicyCount
-                ? "fallback_policy_count=fallback_policy_count+1," : "";
-        return jdbcTemplate.update("update scheduler_task set status='FAILED', finish_time=?, error_code=?,"
-                        + " error_msg=?, fallback_check_at=null, " + countUpdate
-                        + " update_time=?, version=version+1"
-                        + " where id=? and status in ('PENDING','RUNNABLE','WAIT_RETRY')"
-                        + " and status=? and group_code=? and fallback_check_at=? and version=?"
-                        + " and (wait_deadline_at is null or wait_deadline_at > ?)",
-                Timestamp.valueOf(now), errorCode, errorMsg, Timestamp.valueOf(now), snapshot.getId(),
-                snapshot.getStatus().name(), snapshot.getGroupCode(), timestamp(snapshot.getFallbackCheckAt()),
-                snapshot.getVersion(), Timestamp.valueOf(now)) > 0;
     }
 
     @Override

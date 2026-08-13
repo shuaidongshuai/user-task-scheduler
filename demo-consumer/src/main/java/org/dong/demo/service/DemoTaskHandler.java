@@ -62,7 +62,7 @@ public class DemoTaskHandler implements TaskHandler {
                     task.getId(), bizKey, task.getRetryCount());
             if (options.executeRetryTargetGroup != null && !options.executeRetryTargetGroup.isBlank()) {
                 return TaskExecuteResult.retryableOnGroup("RETRYABLE_FAIL", "simulated retry before success",
-                        options.executeRetryTargetGroup.trim());
+                        options.executeRetryTargetGroup.trim(), null);
             }
             return TaskExecuteResult.failed("RETRYABLE_FAIL", "simulated retry before success", true);
         }

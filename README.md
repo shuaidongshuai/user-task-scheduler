@@ -294,25 +294,45 @@ Handler 可返回：
 - `routeTo(groupCode, nextCheckAt)`：切换到另一个已启用 Group，可选继续检查。
 - `keepCurrent(nextCheckAt)`：保留当前 Group，并在未来再次检查。
 - `stopChecking()`：停止后续降级检查。
-- `fail(code, message)`：将任务置为失败并传播依赖终态。
+- `fail(code, message)`：停止后续降级检查；不会改变任务状态或传播依赖终态。
 
 `RUNNING` 与仍持有并发的 `WAIT_HOLD` 不会触发该回调。回调应快速、无副作用并响应线程中断；
 多实例竞争时回调可能重复计算，但只有符合任务快照的数据库 CAS 能生效。
 若回调抛出异常，框架不会将业务任务置为失败，而是保留当前 group，并在
-`10 × fallback-min-next-check-delay-ms` 后重试 fallback 检查；返回 `null` 或非法决策仍视为接入错误并使任务失败。
+`10 × fallback-min-next-check-delay-ms` 后重试 fallback 检查；返回 `null` 或非法决策会停止后续降级检查，但不会影响任务状态。
 
 ### 执行期重试切换 Group
 
 当 `TaskHandler#execute` 发现当前 group 不适合继续处理时，可返回
-`TaskExecuteResult.retryableOnGroup(errorCode, errorMessage, targetGroupCode)`。框架验证 target group
+`TaskExecuteResult.retryableOnGroup(errorCode, errorMessage, targetGroupCode, nextFallbackCheckAt)`。框架验证 target group
 已启用后，原子地将任务改为 `WAIT_RETRY` 和目标 `group_code`，下一次执行由目标 group 调度：
 
 ```java
 return TaskExecuteResult.retryableOnGroup(
-        "UPSTREAM_OVERLOADED", "retry through backup group", "image-render-backup");
+        "UPSTREAM_OVERLOADED", "retry through backup group", "image-render-backup",
+        LocalDateTime.now().plusMinutes(5));
 ```
 
-若无需记录错误原因，也可简写为 `TaskExecuteResult.retryableOnGroup("image-render-backup")`。
+`nextFallbackCheckAt` 为空时，框架会清空原有的 `fallbackCheckAt`，停止后续 fallback 检查，
+避免继承已到期的历史检查时间而立即再次触发降级。若无需记录错误原因，可使用
+`TaskExecuteResult.retryableOnGroup(targetGroupCode, nextFallbackCheckAt)`。
+
+#### 本次重试的调度时间
+
+`TaskHandler#execute` 可修改传入 `SchedulerTask` 的 `retryDelaySec`，以控制本次重试（包括切换
+Group 的重试）的下一次调度时间。例如，设置为 `0` 表示任务在目标 Group 中立即具备调度条件：
+
+```java
+@Override
+public TaskExecuteResult execute(SchedulerTask task) {
+    task.setRetryDelaySec(0);
+    return TaskExecuteResult.retryableOnGroup("image-render-backup", null);
+}
+```
+
+该修改仅用于当前执行结束时计算 `nextRetryAt` 和 `executeAt`，不会写回数据库的 `retry_delay_sec`。
+因此下一轮及后续轮次从数据库重新加载任务后，仍使用任务提交时保存的重试延迟；实际开始执行仍受目标
+Group 与用户并发额度、队列调度周期影响。
 
 这仅适用于可重试执行：本次执行的并发始终从 source group 释放，避免把 `WAIT_HOLD` 的持有并发错误地
 迁移到 target group。目标 group 不存在、未启用、与 source 相同或重试 CAS 失败时，任务会失败并记录
