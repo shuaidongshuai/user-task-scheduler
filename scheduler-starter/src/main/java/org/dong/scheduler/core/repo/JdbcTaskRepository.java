@@ -1,5 +1,6 @@
 package org.dong.scheduler.core.repo;
 
+import lombok.extern.slf4j.Slf4j;
 import org.dong.scheduler.core.enums.TaskStatus;
 import org.dong.scheduler.core.model.SchedulerTask;
 import org.dong.scheduler.core.model.TaskSubmitRequest;
@@ -18,6 +19,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
+@Slf4j
 public class JdbcTaskRepository implements TaskRepository {
     private final JdbcTemplate jdbcTemplate;
 
@@ -143,7 +145,12 @@ public class JdbcTaskRepository implements TaskRepository {
                  where id=? and status in ('RUNNABLE','WAIT_RETRY') and group_code=? and version=?
                 """, instanceId, instanceId, threadName, Timestamp.valueOf(now), Timestamp.valueOf(now),
                 id, expectedGroupCode, expectedVersion);
-        return updated > 0;
+        boolean success = updated > 0;
+        if (!success) {
+            log.debug("casToRunning rejected, taskId={}, expectedGroup={}, expectedVersion={}, instance={}, thread={}, affectedRows={}",
+                    id, expectedGroupCode, expectedVersion, instanceId, threadName, updated);
+        }
+        return success;
     }
 
     @Override

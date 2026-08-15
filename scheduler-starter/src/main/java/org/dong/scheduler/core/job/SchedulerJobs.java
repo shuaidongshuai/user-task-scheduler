@@ -59,14 +59,14 @@ public class SchedulerJobs {
      */
     public void dispatch() {
         long begin = System.currentTimeMillis();
-        log.debug("scheduler dispatch job start");
+//        log.debug("scheduler dispatch job start");
         dispatchService.dispatchOnce();
         log.debug("scheduler dispatch job end, costMs={}", System.currentTimeMillis() - begin);
     }
 
     public void expireWaitingTasks() {
         long begin = System.currentTimeMillis();
-        log.debug("scheduler expire waiting job start");
+//        log.debug("scheduler expire waiting job start");
         int expired = recoveryService.expireWaitingTasks();
         if (expired > 0) {
             log.info("scheduler expire waiting job end, expired={}, costMs={}", expired, System.currentTimeMillis() - begin);
@@ -97,7 +97,7 @@ public class SchedulerJobs {
      */
     public void recover() {
         long begin = System.currentTimeMillis();
-        log.debug("scheduler recover job start");
+//        log.debug("scheduler recover job start");
         recoveryService.runWithScheduledJobLock(RECOVER_JOB, "recovery scan", () -> {
             var groups = groupConfigRepository.listEnabled();
             int totalRecovered = 0;
@@ -129,7 +129,7 @@ public class SchedulerJobs {
      */
     public void refillQueue() {
         long begin = System.currentTimeMillis();
-        log.debug("scheduler refill job start");
+//        log.debug("scheduler refill job start");
         int refilled = recoveryService.refillQueue();
         if (refilled > 0) {
             log.info("scheduler refill job end, refilled={}, costMs={}", refilled, System.currentTimeMillis() - begin);

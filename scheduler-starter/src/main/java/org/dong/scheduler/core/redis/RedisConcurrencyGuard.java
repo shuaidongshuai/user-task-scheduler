@@ -1,5 +1,6 @@
 package org.dong.scheduler.core.redis;
 
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.connection.ReturnType;
 import org.springframework.data.redis.core.ScanOptions;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -15,6 +16,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+@Slf4j
 public class RedisConcurrencyGuard implements ConcurrencyGuard {
     private static final String ACQUIRE_SCRIPT = """
             local groupRunning = tonumber(redis.call('GET', KEYS[1]) or '0')
@@ -146,7 +148,10 @@ public class RedisConcurrencyGuard implements ConcurrencyGuard {
                         executeNo.getBytes(StandardCharsets.UTF_8),
                         String.valueOf(leaseSec).getBytes(StandardCharsets.UTF_8)
                 ), true);
-        return result != null && result == 1L;
+        boolean success = result != null && result == 1L;
+        log.debug("concurrency acquire {}, taskId={}, group={}, user={}, groupLimit={}, userLimit={}, result={}",
+                success ? "succeeded" : "rejected", taskId, groupCode, userId, groupMax, userLimit, result);
+        return success;
     }
 
     @Override

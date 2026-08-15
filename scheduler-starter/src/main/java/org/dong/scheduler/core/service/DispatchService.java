@@ -140,6 +140,8 @@ public class DispatchService {
                     cfg.getGroupCode(), dispatchRoute, userId, properties.getActiveUserLockTtlMs()
             );
             if (lockToken == null) {
+                log.debug("dispatch skipped active-user lock, group={}, route={}, user={}",
+                        cfg.getGroupCode(), dispatchRoute, userId);
                 queueRedisService.rebalanceActiveUser(cfg.getGroupCode(), dispatchRoute, userId);
                 continue;
             }
@@ -290,6 +292,10 @@ public class DispatchService {
                                 cfg.getMaxConcurrency(), userLimit, cfg.getLockExpireSec(), executeNo
                         );
                         if (!acquired) {
+                            log.debug("dispatch skipped concurrency, taskId={}, taskNo={}, group={}, user={}, "
+                                            + "groupRunning={}, groupLimit={}, userRunning={}, userLimit={}, version={}",
+                                    task.getId(), task.getTaskNo(), cfg.getGroupCode(), task.getUserId(),
+                                    groupRunning, cfg.getMaxConcurrency(), userRunning, userLimit, task.getVersion());
                             skipped++;
                             long latestGroupRunning = concurrencyGuard.groupRunning(cfg.getGroupCode());
                             if (latestGroupRunning >= cfg.getMaxConcurrency()) {

@@ -7,6 +7,7 @@ import org.dong.scheduler.core.model.GroupFallbackDecision;
 import org.dong.scheduler.core.model.SchedulerTask;
 import org.dong.scheduler.core.repo.TaskRepository;
 import org.dong.scheduler.core.spi.TaskHandler;
+import org.dong.scheduler.core.util.ThreadContextUtil;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -76,10 +77,10 @@ public class GroupFallbackScanner {
                 }
                 AtomicLong startedNanos = new AtomicLong(0L);
                 try {
-                    Future<GroupFallbackDecision> future = callbackExecutor.submit(() -> {
+                    Future<GroupFallbackDecision> future = callbackExecutor.submit(ThreadContextUtil.addContext(() -> {
                         startedNanos.set(System.nanoTime());
                         return handler.onGroupWaitTimeout(snapshot);
-                    });
+                    }));
                     inFlight.add(new CallbackSlot(snapshot, future, startedNanos));
                 } catch (RejectedExecutionException ex) {
                     fallbackService.deferAfterExecutorReject(snapshot, LocalDateTime.now());

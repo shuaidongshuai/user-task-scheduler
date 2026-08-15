@@ -1,5 +1,6 @@
 package org.dong.scheduler.core.redis;
 
+import lombok.extern.slf4j.Slf4j;
 import org.dong.scheduler.config.SchedulerProperties;
 import org.dong.scheduler.core.model.SchedulerTask;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -12,6 +13,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
+@Slf4j
 public class QueueRedisService {
     private static final long SCORE_MULTIPLIER = 10_000_000_000_000L;
     private static final int MIN_PRIORITY = 0;
@@ -30,6 +32,8 @@ public class QueueRedisService {
         long executeAt = toEpochMillis(task.getExecuteAt());
         redisTemplate.opsForZSet().add(RedisKeys.timeQueue(task.getGroupCode(), task.getDispatchRoute()),
                 task.getId().toString(), executeAt);
+        log.debug("queue enqueue, taskId={}, taskNo={}, group={}, route={}, executeAt={}",
+                task.getId(), task.getTaskNo(), task.getGroupCode(), task.getDispatchRoute(), task.getExecuteAt());
     }
 
     public List<Long> promoteDueTasks(String groupCode, String dispatchRoute, long nowEpochMillis, int limit) {
@@ -38,6 +42,8 @@ public class QueueRedisService {
         if (due == null || due.isEmpty()) {
             return List.of();
         }
+        log.debug("queue promote due, group={}, route={}, count={}, taskIds={}",
+                groupCode, dispatchRoute, due.size(), due);
 
         List<Long> moved = new ArrayList<>(due.size());
         for (String taskIdStr : due) {
@@ -52,6 +58,8 @@ public class QueueRedisService {
         String queueKey = RedisKeys.userReadyQueue(task.getGroupCode(), task.getDispatchRoute(), task.getUserId());
         redisTemplate.opsForZSet().add(queueKey, task.getId().toString(), taskScore(task));
         refreshActiveUser(task.getGroupCode(), task.getDispatchRoute(), task.getUserId(), false);
+        log.debug("queue ready enqueue, taskId={}, taskNo={}, group={}, route={}, user={}",
+                task.getId(), task.getTaskNo(), task.getGroupCode(), task.getDispatchRoute(), task.getUserId());
     }
 
     public boolean existsInReadyQueue(SchedulerTask task) {
@@ -94,7 +102,10 @@ public class QueueRedisService {
                 token,
                 Duration.ofMillis(ttlMillis)
         );
-        return Boolean.TRUE.equals(acquired) ? token : null;
+        boolean success = Boolean.TRUE.equals(acquired);
+        log.debug("active user lock {}, group={}, route={}, user={}, ttlMs={}",
+                success ? "acquired" : "rejected", groupCode, dispatchRoute, userId, ttlMillis);
+        return success ? token : null;
     }
 
     public void releaseActiveUserLock(String groupCode, String dispatchRoute, String userId, String token) {
