@@ -114,6 +114,9 @@ class WaitHoldRealEnvTest {
         assertEquals(1L, userRunning());
         assertNull(taskLease(taskId));
         assertEquals(List.of("WAIT_HOLD"), executionStatuses(taskId));
+        assertNotNull(waiting.getStartTime());
+        assertNull(waiting.getFinishTime());
+        LocalDateTime firstStartTime = waiting.getStartTime();
 
         waitForDue(waiting.getExecuteAt());
         dispatchUntilStatus(taskId, TaskStatus.SUCCESS, 10_000L);
@@ -129,6 +132,9 @@ class WaitHoldRealEnvTest {
         assertEquals(0L, userRunning());
         assertNull(taskLease(taskId));
         assertEquals(List.of("WAIT_HOLD", "SUCCESS"), executionStatuses(taskId));
+        assertEquals(firstStartTime, finished.getStartTime());
+        assertNotNull(finished.getFinishTime());
+        assertTrue(finished.getFinishTime().isAfter(finished.getStartTime()));
     }
 
     private void dispatchUntilStatus(long taskId, TaskStatus target, long timeoutMs) throws Exception {

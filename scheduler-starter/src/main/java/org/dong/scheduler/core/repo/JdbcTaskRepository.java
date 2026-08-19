@@ -158,9 +158,9 @@ public class JdbcTaskRepository implements TaskRepository {
         int updated = jdbcTemplate.update("""
                 update scheduler_task
                    set status='RUNNING', dispatcher_instance=?, worker_instance=?, worker_thread=?,
-                       start_time=?, heartbeat_time=?, update_time=now(), version=version+1
+                       heartbeat_time=?, update_time=now(), version=version+1
                  where id=? and status='WAIT_HOLD'
-                """, instanceId, instanceId, threadName, Timestamp.valueOf(now), Timestamp.valueOf(now), id);
+                """, instanceId, instanceId, threadName, Timestamp.valueOf(now), id);
         return updated > 0;
     }
 
