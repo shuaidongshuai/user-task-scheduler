@@ -124,6 +124,23 @@ class DynamicUserLimitServiceTest {
     }
 
     @Test
+    void shouldKeepZeroUserLimitEvenWhenDynamicStrategyMinimumIsPositive() {
+        DynamicUserLimitService service = new DynamicUserLimitService(new ObjectMapper());
+
+        GroupConfig groupConfig = new GroupConfig();
+        groupConfig.setMaxConcurrency(10);
+        UserConcurrencyConfig userConfig = new UserConcurrencyConfig();
+        userConfig.setUserBaseConcurrency(0);
+        userConfig.setDynamicUserLimitEnabled(true);
+        userConfig.setLoadStrategyJson("""
+                {"enabled":true,"maxLimit":20,"minLimit":1,"rounding":"FLOOR",
+                 "rules":[{"factor":3.0,"loadLt":1.0}]}
+                """);
+
+        assertEquals(0, service.calculate(groupConfig, userConfig, 0));
+    }
+
+    @Test
     void shouldFallBackToUserBaseConcurrencyWhenUserStrategyIsInvalid() {
         DynamicUserLimitService service = new DynamicUserLimitService(new ObjectMapper());
 
