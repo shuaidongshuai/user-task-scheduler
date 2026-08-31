@@ -10,8 +10,10 @@ import org.dong.scheduler.core.repo.GroupConfigRepository;
 import org.dong.scheduler.core.repo.JdbcGroupConfigRepository;
 import org.dong.scheduler.core.repo.JdbcTaskDependencyRepository;
 import org.dong.scheduler.core.repo.JdbcTaskRepository;
+import org.dong.scheduler.core.repo.JdbcUserConcurrencyConfigRepository;
 import org.dong.scheduler.core.repo.TaskDependencyRepository;
 import org.dong.scheduler.core.repo.TaskRepository;
+import org.dong.scheduler.core.repo.UserConcurrencyConfigRepository;
 import org.dong.scheduler.core.service.BusinessTaskStateProviderRegistry;
 import org.dong.scheduler.core.service.DefaultTaskDependencyService;
 import org.dong.scheduler.core.service.DefaultSchedulerClient;
@@ -70,6 +72,13 @@ public class SchedulerAutoConfiguration {
     @ConditionalOnMissingBean
     public GroupConfigRepository groupConfigRepository(org.springframework.jdbc.core.JdbcTemplate jdbcTemplate) {
         return new JdbcGroupConfigRepository(jdbcTemplate);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public UserConcurrencyConfigRepository userConcurrencyConfigRepository(
+            org.springframework.jdbc.core.JdbcTemplate jdbcTemplate) {
+        return new JdbcUserConcurrencyConfigRepository(jdbcTemplate);
     }
 
     @Bean
@@ -218,6 +227,7 @@ public class SchedulerAutoConfiguration {
     @ConditionalOnMissingBean
     public DispatchService dispatchService(SchedulerProperties properties,
                                            GroupConfigRepository groupConfigRepository,
+                                           UserConcurrencyConfigRepository userConcurrencyConfigRepository,
                                            TaskRepository taskRepository,
                                            QueueRedisService queueRedisService,
                                            ConcurrencyGuard concurrencyGuard,
@@ -228,7 +238,8 @@ public class SchedulerAutoConfiguration {
                                            BusinessTaskStateProviderRegistry businessTaskStateProviderRegistry,
                                            TaskStateService taskStateService) {
         ensureInstanceId(properties);
-        return new DispatchService(properties, groupConfigRepository, taskRepository, queueRedisService,
+        return new DispatchService(properties, groupConfigRepository, userConcurrencyConfigRepository,
+                taskRepository, queueRedisService,
                 concurrencyGuard, dynamicUserLimitService, workerService, recoveryService, taskHandlerRegistry,
                 businessTaskStateProviderRegistry, taskStateService);
     }
@@ -267,6 +278,7 @@ public class SchedulerAutoConfiguration {
                                            SchedulerProperties properties,
                                            TaskStateService taskStateService,
                                            GroupConfigRepository groupConfigRepository,
+                                           UserConcurrencyConfigRepository userConcurrencyConfigRepository,
                                            DynamicUserLimitService dynamicUserLimitService,
                                            ConcurrencyGuard concurrencyGuard,
                                            WorkerService workerService) {
@@ -277,6 +289,7 @@ public class SchedulerAutoConfiguration {
                 properties,
                 taskStateService,
                 groupConfigRepository,
+                userConcurrencyConfigRepository,
                 dynamicUserLimitService,
                 concurrencyGuard,
                 workerService

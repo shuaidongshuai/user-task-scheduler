@@ -166,6 +166,19 @@ public void executeSyncDemo() {
 - `dynamic_user_limit_enabled`：是否开启动态 user 并发
 - `load_strategy_json`：动态并发策略
 
+### 用户渠道并发配置
+
+`scheduler_user_concurrency_config` 可覆盖指定用户在指定 group 下的用户并发策略。
+
+- `user_id`：用户 ID
+- `group_code`：任务组编码
+- `user_base_concurrency`：覆盖 `scheduler_group_config.user_base_concurrency`
+- `load_strategy_json`：覆盖 `scheduler_group_config.load_strategy_json`
+
+存在 `user_id + group_code` 配置时优先使用这两个字段；不存在时继续使用 group 配置。
+`dynamic_user_limit_enabled` 和 `max_concurrency` 始终取自 `scheduler_group_config`，其中
+`max_concurrency` 是 group 不可突破的最终并发上限。
+
 ### dispatchRoute 路由隔离
 
 适用场景：

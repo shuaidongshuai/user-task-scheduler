@@ -1,6 +1,7 @@
 DROP TABLE IF EXISTS scheduler_task_execution;
 DROP TABLE IF EXISTS scheduler_task_dependency;
 DROP TABLE IF EXISTS scheduler_task_group_fallback_log;
+DROP TABLE IF EXISTS scheduler_user_concurrency_config;
 DROP TABLE IF EXISTS scheduler_group_config;
 DROP TABLE IF EXISTS scheduler_task;
 
@@ -138,3 +139,16 @@ CREATE TABLE IF NOT EXISTS scheduler_task_execution (
     INDEX idx_task_id (task_id),
     INDEX idx_group_time (group_code, start_time)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='任务执行记录表';
+
+CREATE TABLE IF NOT EXISTS scheduler_user_concurrency_config (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT COMMENT '主键ID',
+    user_id VARCHAR(64) NOT NULL COMMENT '用户ID',
+    group_code VARCHAR(64) NOT NULL COMMENT '任务组编码',
+    user_base_concurrency INT NOT NULL COMMENT '用户基础并发',
+    dynamic_user_limit_enabled TINYINT NOT NULL DEFAULT 0 COMMENT '是否启用动态user并发策略',
+    load_strategy_json JSON DEFAULT NULL COMMENT '动态策略配置JSON',
+    description VARCHAR(255) DEFAULT NULL COMMENT '配置描述',
+    create_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    update_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    UNIQUE KEY uk_user_group (user_id, group_code)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='用户渠道并发配置表';

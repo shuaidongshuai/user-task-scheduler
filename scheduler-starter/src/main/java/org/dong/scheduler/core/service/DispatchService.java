@@ -6,10 +6,12 @@ import org.dong.scheduler.core.enums.BusinessTaskState;
 import org.dong.scheduler.core.enums.TaskStatus;
 import org.dong.scheduler.core.model.GroupConfig;
 import org.dong.scheduler.core.model.SchedulerTask;
+import org.dong.scheduler.core.model.UserConcurrencyConfig;
 import org.dong.scheduler.core.redis.ConcurrencyGuard;
 import org.dong.scheduler.core.redis.QueueRedisService;
 import org.dong.scheduler.core.repo.GroupConfigRepository;
 import org.dong.scheduler.core.repo.TaskRepository;
+import org.dong.scheduler.core.repo.UserConcurrencyConfigRepository;
 import org.dong.scheduler.core.spi.BusinessTaskStateProvider;
 import org.dong.scheduler.core.spi.TaskHandler;
 
@@ -29,6 +31,7 @@ public class DispatchService {
 
     private final SchedulerProperties properties;
     private final GroupConfigRepository groupConfigRepository;
+    private final UserConcurrencyConfigRepository userConcurrencyConfigRepository;
     private final TaskRepository taskRepository;
     private final QueueRedisService queueRedisService;
     private final ConcurrencyGuard concurrencyGuard;
@@ -42,6 +45,7 @@ public class DispatchService {
 
     public DispatchService(SchedulerProperties properties,
                            GroupConfigRepository groupConfigRepository,
+                           UserConcurrencyConfigRepository userConcurrencyConfigRepository,
                            TaskRepository taskRepository,
                            QueueRedisService queueRedisService,
                            ConcurrencyGuard concurrencyGuard,
@@ -53,6 +57,7 @@ public class DispatchService {
                            TaskStateService taskStateService) {
         this.properties = properties;
         this.groupConfigRepository = groupConfigRepository;
+        this.userConcurrencyConfigRepository = userConcurrencyConfigRepository;
         this.taskRepository = taskRepository;
         this.queueRedisService = queueRedisService;
         this.concurrencyGuard = concurrencyGuard;
@@ -153,12 +158,12 @@ public class DispatchService {
                     continue;
                 }
 
-                int userLimit = dynamicUserLimitService.calculate(cfg, groupRunning);
+                UserConcurrencyConfig userConfig = userConcurrencyConfigRepository
+                        .findByUserIdAndGroupCode(userId, cfg.getGroupCode())
+                        .orElse(null);
                 long userRunning = concurrencyGuard.userRunning(cfg.getGroupCode(), userId);
-                int batchLimit = pageSize;
-
                 List<Long> ready = queueRedisService.peekReadyTasksByPriority(
-                        cfg.getGroupCode(), dispatchRoute, userId, headPriority, batchLimit
+                        cfg.getGroupCode(), dispatchRoute, userId, headPriority, pageSize
                 );
                 if (ready.isEmpty()) {
                     queueRedisService.rebalanceActiveUser(cfg.getGroupCode(), dispatchRoute, userId);
@@ -166,7 +171,6 @@ public class DispatchService {
                 }
 
                 Map<Long, SchedulerTask> readyTasks = taskRepository.findByIds(ready);
-                boolean stopCurrentUser = false;
                 for (Long taskId : ready) {
                     SchedulerTask task = readyTasks.get(taskId);
                     if (task == null) {
@@ -277,16 +281,16 @@ public class DispatchService {
                         }
                     }
 
-                    String executeNo = workerService.newExecuteNo();
                     boolean freshTask = !waitHoldTask;
+                    String executeNo;
                     if (freshTask) {
-                        userLimit = dynamicUserLimitService.calculate(cfg, groupRunning);
+                        int userLimit = dynamicUserLimitService.calculate(cfg, userConfig, groupRunning);
                         int groupRemaining = Math.max(0, cfg.getMaxConcurrency() - (int) groupRunning);
                         int userRemaining = Math.max(0, userLimit - (int) userRunning);
                         if (groupRemaining <= 0 || userRemaining <= 0) {
-                            stopCurrentUser = true;
                             break;
                         }
+                        executeNo = workerService.newExecuteNo();
                         boolean acquired = concurrencyGuard.tryAcquire(
                                 cfg.getGroupCode(), task.getUserId(), task.getId(),
                                 cfg.getMaxConcurrency(), userLimit, cfg.getLockExpireSec(), executeNo
@@ -298,18 +302,19 @@ public class DispatchService {
                                     groupRunning, cfg.getMaxConcurrency(), userRunning, userLimit, task.getVersion());
                             skipped++;
                             long latestGroupRunning = concurrencyGuard.groupRunning(cfg.getGroupCode());
+                            groupRunning = latestGroupRunning;
                             if (latestGroupRunning >= cfg.getMaxConcurrency()) {
-                                groupRunning = latestGroupRunning;
                                 break;
                             }
                             long latestUserRunning = concurrencyGuard.userRunning(cfg.getGroupCode(), task.getUserId());
+                            userRunning = latestUserRunning;
                             if (latestUserRunning >= userLimit) {
-                                stopCurrentUser = true;
                                 break;
                             }
                             continue;
                         }
                     } else {
+                        executeNo = workerService.newExecuteNo();
                         boolean leaseAcquired = concurrencyGuard.acquireLease(task.getId(), executeNo, cfg.getLockExpireSec());
                         if (!leaseAcquired) {
                             skipped++;
@@ -343,6 +348,7 @@ public class DispatchService {
                         queueRedisService.removeFromReadyQueue(task);
                         if (freshTask) {
                             groupRunning++;
+                            userRunning++;
                         }
                         dispatched++;
                     } catch (RuntimeException ex) {
@@ -390,9 +396,6 @@ public class DispatchService {
                 queueRedisService.rebalanceActiveUser(cfg.getGroupCode(), dispatchRoute, userId);
                 if (workerPoolSaturated) {
                     break;
-                }
-                if (stopCurrentUser) {
-                    continue;
                 }
             } finally {
                 queueRedisService.releaseActiveUserLock(cfg.getGroupCode(), dispatchRoute, userId, lockToken);

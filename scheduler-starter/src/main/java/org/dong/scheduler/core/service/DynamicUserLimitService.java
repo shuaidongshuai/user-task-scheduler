@@ -3,6 +3,7 @@ package org.dong.scheduler.core.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.dong.scheduler.core.model.GroupConfig;
 import org.dong.scheduler.core.model.LoadStrategy;
+import org.dong.scheduler.core.model.UserConcurrencyConfig;
 
 public class DynamicUserLimitService {
     private final ObjectMapper objectMapper;
@@ -12,18 +13,32 @@ public class DynamicUserLimitService {
     }
 
     public int calculate(GroupConfig config, long groupRunning) {
-        int base = config.getUserBaseConcurrency();
-        if (!config.isDynamicUserLimitEnabled() || config.getLoadStrategyJson() == null || config.getLoadStrategyJson().isBlank()) {
+        return calculate(config, null, groupRunning);
+    }
+
+    public int calculate(GroupConfig groupConfig, UserConcurrencyConfig userConfig, long groupRunning) {
+        int base = userConfig == null
+                ? groupConfig.getUserBaseConcurrency()
+                : userConfig.getUserBaseConcurrency();
+        String loadStrategyJson = userConfig == null
+                ? groupConfig.getLoadStrategyJson()
+                : userConfig.getLoadStrategyJson();
+        boolean dynamicUserLimitEnabled = userConfig == null
+                ? groupConfig.isDynamicUserLimitEnabled()
+                : userConfig.isDynamicUserLimitEnabled();
+        if (!dynamicUserLimitEnabled || loadStrategyJson == null || loadStrategyJson.isBlank()) {
             return Math.max(base, 1);
         }
 
         try {
-            LoadStrategy strategy = objectMapper.readValue(config.getLoadStrategyJson(), LoadStrategy.class);
+            LoadStrategy strategy = objectMapper.readValue(loadStrategyJson, LoadStrategy.class);
             if (!strategy.isEnabled() || strategy.getRules().isEmpty()) {
                 return Math.max(base, 1);
             }
 
-            double load = config.getMaxConcurrency() <= 0 ? 1.0 : (double) groupRunning / config.getMaxConcurrency();
+            double load = groupConfig.getMaxConcurrency() <= 0
+                    ? 1.0
+                    : (double) groupRunning / groupConfig.getMaxConcurrency();
             double factor = 1.0;
             for (LoadStrategy.Rule r : strategy.getRules()) {
                 if (load < r.getLoadLt()) {

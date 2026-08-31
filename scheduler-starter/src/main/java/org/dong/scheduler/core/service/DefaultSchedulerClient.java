@@ -8,6 +8,7 @@ import org.dong.scheduler.core.model.GroupConfig;
 import org.dong.scheduler.core.model.SchedulerTask;
 import org.dong.scheduler.core.model.TaskDependencyRequest;
 import org.dong.scheduler.core.model.TaskSubmitRequest;
+import org.dong.scheduler.core.model.UserConcurrencyConfig;
 import org.dong.scheduler.core.model.batch.BatchSubmitDependencyRequest;
 import org.dong.scheduler.core.model.batch.BatchSubmitRequest;
 import org.dong.scheduler.core.model.batch.BatchSubmitResultItem;
@@ -16,6 +17,7 @@ import org.dong.scheduler.core.redis.ConcurrencyGuard;
 import org.dong.scheduler.core.redis.QueueRedisService;
 import org.dong.scheduler.core.repo.GroupConfigRepository;
 import org.dong.scheduler.core.repo.TaskRepository;
+import org.dong.scheduler.core.repo.UserConcurrencyConfigRepository;
 import org.dong.scheduler.core.spi.SchedulerClient;
 
 import java.time.LocalDateTime;
@@ -41,6 +43,7 @@ public class DefaultSchedulerClient implements SchedulerClient {
     private final SchedulerProperties properties;
     private final TaskStateService taskStateService;
     private final GroupConfigRepository groupConfigRepository;
+    private final UserConcurrencyConfigRepository userConcurrencyConfigRepository;
     private final DynamicUserLimitService dynamicUserLimitService;
     private final ConcurrencyGuard concurrencyGuard;
     private final WorkerService workerService;
@@ -50,6 +53,7 @@ public class DefaultSchedulerClient implements SchedulerClient {
                                   SchedulerProperties properties,
                                   TaskStateService taskStateService,
                                   GroupConfigRepository groupConfigRepository,
+                                  UserConcurrencyConfigRepository userConcurrencyConfigRepository,
                                   DynamicUserLimitService dynamicUserLimitService,
                                   ConcurrencyGuard concurrencyGuard,
                                   WorkerService workerService) {
@@ -58,6 +62,7 @@ public class DefaultSchedulerClient implements SchedulerClient {
         this.properties = properties;
         this.taskStateService = taskStateService;
         this.groupConfigRepository = groupConfigRepository;
+        this.userConcurrencyConfigRepository = userConcurrencyConfigRepository;
         this.dynamicUserLimitService = dynamicUserLimitService;
         this.concurrencyGuard = concurrencyGuard;
         this.workerService = workerService;
@@ -86,7 +91,10 @@ public class DefaultSchedulerClient implements SchedulerClient {
         GroupConfig groupConfig = groupConfigRepository.findEnabledByGroupCode(normalized.getGroupCode())
                 .orElseThrow(() -> new IllegalArgumentException("enabled group config not found: " + normalized.getGroupCode()));
         long groupRunning = concurrencyGuard.groupRunning(groupConfig.getGroupCode());
-        int userLimit = dynamicUserLimitService.calculate(groupConfig, groupRunning);
+        UserConcurrencyConfig userConfig = userConcurrencyConfigRepository
+                .findByUserIdAndGroupCode(normalized.getUserId(), groupConfig.getGroupCode())
+                .orElse(null);
+        int userLimit = dynamicUserLimitService.calculate(groupConfig, userConfig, groupRunning);
         String taskNo = "t-" + UUID.randomUUID().toString().replace("-", "");
         String executeNo = UUID.randomUUID().toString().replace("-", "");
         log.info("submit sync task request accepted, taskNo={}, group={}, user={}, bizType={}, priority={}, executeAt={}, "

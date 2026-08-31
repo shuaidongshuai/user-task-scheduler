@@ -8,6 +8,7 @@ import org.dong.scheduler.core.model.GroupConfig;
 import org.dong.scheduler.core.model.SchedulerTask;
 import org.dong.scheduler.core.model.TaskDependencyRequest;
 import org.dong.scheduler.core.model.TaskSubmitRequest;
+import org.dong.scheduler.core.model.UserConcurrencyConfig;
 import org.dong.scheduler.core.redis.ConcurrencyGuard;
 import org.dong.scheduler.core.model.batch.BatchSubmitDependencyRequest;
 import org.dong.scheduler.core.model.batch.BatchSubmitRequest;
@@ -16,6 +17,7 @@ import org.dong.scheduler.core.model.batch.BatchSubmitTaskRequest;
 import org.dong.scheduler.core.redis.QueueRedisService;
 import org.dong.scheduler.core.repo.GroupConfigRepository;
 import org.dong.scheduler.core.repo.TaskRepository;
+import org.dong.scheduler.core.repo.UserConcurrencyConfigRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -33,6 +35,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -47,6 +50,8 @@ class DefaultSchedulerClientTest {
     private TaskStateService taskStateService;
     @Mock
     private GroupConfigRepository groupConfigRepository;
+    @Mock
+    private UserConcurrencyConfigRepository userConcurrencyConfigRepository;
     @Mock
     private DynamicUserLimitService dynamicUserLimitService;
     @Mock
@@ -63,7 +68,8 @@ class DefaultSchedulerClientTest {
         properties.setDispatchRoute("route-a");
         properties.setInstanceId("ins-test");
         schedulerClient = new DefaultSchedulerClient(taskRepository, queueRedisService, properties, taskStateService,
-                groupConfigRepository, dynamicUserLimitService, concurrencyGuard, workerService);
+                groupConfigRepository, userConcurrencyConfigRepository, dynamicUserLimitService,
+                concurrencyGuard, workerService);
     }
 
     @Test
@@ -89,7 +95,7 @@ class DefaultSchedulerClientTest {
         successTask.setStatus(org.dong.scheduler.core.enums.TaskStatus.SUCCESS);
         when(groupConfigRepository.findEnabledByGroupCode("default-group")).thenReturn(Optional.of(groupConfig));
         when(concurrencyGuard.groupRunning("default-group")).thenReturn(0L);
-        when(dynamicUserLimitService.calculate(groupConfig, 0L)).thenReturn(2);
+        when(dynamicUserLimitService.calculate(eq(groupConfig), isNull(), eq(0L))).thenReturn(2);
         when(taskStateService.submitDirect(anyString(), any(TaskSubmitRequest.class), eq(groupConfig), eq(2),
                 eq("ins-test"), anyString(), anyString())).thenReturn(101L);
         when(taskRepository.findById(101L)).thenReturn(Optional.of(runningTask), Optional.of(successTask));
@@ -127,7 +133,7 @@ class DefaultSchedulerClientTest {
         waitHoldTask.setStatus(org.dong.scheduler.core.enums.TaskStatus.WAIT_HOLD);
         when(groupConfigRepository.findEnabledByGroupCode("default-group")).thenReturn(Optional.of(groupConfig));
         when(concurrencyGuard.groupRunning("default-group")).thenReturn(0L);
-        when(dynamicUserLimitService.calculate(groupConfig, 0L)).thenReturn(2);
+        when(dynamicUserLimitService.calculate(eq(groupConfig), isNull(), eq(0L))).thenReturn(2);
         when(taskStateService.submitDirect(anyString(), any(TaskSubmitRequest.class), eq(groupConfig), eq(2),
                 eq("ins-test"), anyString(), anyString())).thenReturn(102L);
         when(taskRepository.findById(102L)).thenReturn(Optional.of(runningTask), Optional.of(waitHoldTask));
@@ -136,6 +142,47 @@ class DefaultSchedulerClientTest {
 
         assertEquals(102L, taskId);
         verify(workerService).executeDirect(eq(runningTask), eq(groupConfig), anyString());
+    }
+
+    @Test
+    void shouldPreferUserConcurrencyConfigForSyncExecution() {
+        TaskSubmitRequest request = new TaskSubmitRequest()
+                .setUserId("u1")
+                .setBizType("demo.biz")
+                .setBizKey("biz-sync-user-config")
+                .setExecuteAt(LocalDateTime.now());
+        GroupConfig groupConfig = new GroupConfig();
+        groupConfig.setGroupCode("default-group");
+        groupConfig.setMaxConcurrency(10);
+        UserConcurrencyConfig userConfig = new UserConcurrencyConfig();
+        userConfig.setUserId("u1");
+        userConfig.setGroupCode("default-group");
+        userConfig.setUserBaseConcurrency(1);
+        SchedulerTask runningTask = new SchedulerTask();
+        runningTask.setId(103L);
+        runningTask.setTaskNo("task-103");
+        runningTask.setGroupCode("default-group");
+        runningTask.setUserId("u1");
+        runningTask.setBizType("demo.biz");
+        SchedulerTask successTask = new SchedulerTask();
+        successTask.setId(103L);
+        successTask.setTaskNo("task-103");
+        successTask.setStatus(org.dong.scheduler.core.enums.TaskStatus.SUCCESS);
+        when(groupConfigRepository.findEnabledByGroupCode("default-group")).thenReturn(Optional.of(groupConfig));
+        when(userConcurrencyConfigRepository.findByUserIdAndGroupCode("u1", "default-group"))
+                .thenReturn(Optional.of(userConfig));
+        when(concurrencyGuard.groupRunning("default-group")).thenReturn(0L);
+        when(dynamicUserLimitService.calculate(groupConfig, userConfig, 0L)).thenReturn(1);
+        when(taskStateService.submitDirect(anyString(), any(TaskSubmitRequest.class), eq(groupConfig), eq(1),
+                eq("ins-test"), anyString(), anyString())).thenReturn(103L);
+        when(taskRepository.findById(103L)).thenReturn(Optional.of(runningTask), Optional.of(successTask));
+
+        long taskId = schedulerClient.executeSync(request);
+
+        assertEquals(103L, taskId);
+        verify(dynamicUserLimitService).calculate(groupConfig, userConfig, 0L);
+        verify(taskStateService).submitDirect(anyString(), any(TaskSubmitRequest.class), eq(groupConfig), eq(1),
+                eq("ins-test"), anyString(), anyString());
     }
 
     @Test
@@ -167,7 +214,8 @@ class DefaultSchedulerClientTest {
         properties.setDefaultGroupCode("default-group");
         properties.setInstanceId("ins-test");
         schedulerClient = new DefaultSchedulerClient(taskRepository, queueRedisService, properties, taskStateService,
-                groupConfigRepository, dynamicUserLimitService, concurrencyGuard, workerService);
+                groupConfigRepository, userConcurrencyConfigRepository, dynamicUserLimitService,
+                concurrencyGuard, workerService);
         TaskSubmitRequest request = new TaskSubmitRequest()
                 .setUserId("u1")
                 .setBizType("demo.biz")
@@ -201,7 +249,7 @@ class DefaultSchedulerClientTest {
         groupConfig.setUserBaseConcurrency(2);
         when(groupConfigRepository.findEnabledByGroupCode("default-group")).thenReturn(Optional.of(groupConfig));
         when(concurrencyGuard.groupRunning("default-group")).thenReturn(0L);
-        when(dynamicUserLimitService.calculate(groupConfig, 0L)).thenReturn(2);
+        when(dynamicUserLimitService.calculate(eq(groupConfig), isNull(), eq(0L))).thenReturn(2);
         when(taskStateService.submitDirect(anyString(), any(TaskSubmitRequest.class), eq(groupConfig), eq(2),
                 eq("ins-test"), anyString(), anyString()))
                 .thenThrow(SchedulerException.concurrencyLimit("sync task is throttled by concurrency limit"));
