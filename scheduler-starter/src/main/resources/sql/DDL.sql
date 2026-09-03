@@ -10,3 +10,7 @@
 ALTER TABLE scheduler_user_concurrency_config
     ADD COLUMN dynamic_user_limit_enabled TINYINT NOT NULL DEFAULT 0
         COMMENT '是否启用动态user并发策略' AFTER user_base_concurrency;
+
+ALTER TABLE scheduler_task_execution
+    MODIFY COLUMN start_time DATETIME(3) NOT NULL COMMENT '开始时间（毫秒精度）',
+    MODIFY COLUMN finish_time DATETIME(3) DEFAULT NULL COMMENT '结束时间（毫秒精度）';

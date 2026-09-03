@@ -125,8 +125,8 @@ CREATE TABLE IF NOT EXISTS scheduler_task_execution (
     dispatcher_instance VARCHAR(128) DEFAULT NULL COMMENT '调度实例标识',
     worker_instance VARCHAR(128) DEFAULT NULL COMMENT '执行实例标识',
 
-    start_time DATETIME NOT NULL COMMENT '开始时间',
-    finish_time DATETIME DEFAULT NULL COMMENT '结束时间',
+    start_time DATETIME(3) NOT NULL COMMENT '开始时间（毫秒精度）',
+    finish_time DATETIME(3) DEFAULT NULL COMMENT '结束时间（毫秒精度）',
     duration_ms BIGINT DEFAULT NULL COMMENT '执行耗时（毫秒）',
 
     error_code VARCHAR(64) DEFAULT NULL COMMENT '错误码',
