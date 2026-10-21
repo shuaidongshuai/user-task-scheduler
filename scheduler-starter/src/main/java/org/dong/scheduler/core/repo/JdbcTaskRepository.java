@@ -12,6 +12,7 @@ import java.sql.PreparedStatement;
 import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -25,6 +26,40 @@ public class JdbcTaskRepository implements TaskRepository {
 
     public JdbcTaskRepository(JdbcTemplate jdbcTemplate) {
         this.jdbcTemplate = jdbcTemplate;
+    }
+
+    @Override
+    public List<SchedulerTask> findDueHeldTasks(String groupCode, String dispatchRoute, LocalDateTime now,
+                                              LocalDateTime afterExecuteAt, Long afterId, int limit) {
+        if (limit <= 0) {
+            return List.of();
+        }
+        boolean legacyRoute = dispatchRoute == null || dispatchRoute.isBlank();
+        List<Object> args = new ArrayList<>();
+        args.add(groupCode);
+        args.add(Timestamp.valueOf(now));
+        String routeClause = legacyRoute ? " and (dispatch_route is null or dispatch_route='')" : " and dispatch_route=?";
+        if (!legacyRoute) {
+            args.add(dispatchRoute);
+        }
+        String cursorClause = "";
+        if (afterExecuteAt != null && afterId != null) {
+            cursorClause = " and (execute_at>? or (execute_at=? and id>?))";
+            args.add(Timestamp.valueOf(afterExecuteAt));
+            args.add(Timestamp.valueOf(afterExecuteAt));
+            args.add(afterId);
+        }
+        args.add(limit);
+        return jdbcTemplate.query("""
+                select id,user_id,execute_at from scheduler_task
+                 where group_code=? and status='WAIT_HOLD' and execute_at<=?
+                """ + routeClause + cursorClause + " order by execute_at,id limit ?", (rs, row) -> {
+                    SchedulerTask task = new SchedulerTask();
+                    task.setId(rs.getLong("id"));
+                    task.setUserId(rs.getString("user_id"));
+                    task.setExecuteAt(tsToLdt(rs.getTimestamp("execute_at")));
+                    return task;
+                }, args.toArray());
     }
 
     @Override

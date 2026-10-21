@@ -18,6 +18,10 @@ public interface TaskRepository {
 
     Map<Long, SchedulerTask> findByIds(List<Long> ids);
 
+    /** Returns id/userId/executeAt candidates across users; callers must re-read under the shared user lock. */
+    List<SchedulerTask> findDueHeldTasks(String groupCode, String dispatchRoute, LocalDateTime now,
+                                       LocalDateTime afterExecuteAt, Long afterId, int limit);
+
     Optional<SchedulerTask> findByTaskNo(String taskNo);
 
     List<Long> findExistingTaskIds(List<Long> taskIds);

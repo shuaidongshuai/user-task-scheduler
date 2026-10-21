@@ -17,9 +17,11 @@ import org.dong.scheduler.core.spi.TaskHandler;
 
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -42,6 +44,11 @@ public class DispatchService {
     private final BusinessTaskStateProviderRegistry businessTaskStateProviderRegistry;
     private final TaskStateService taskStateService;
     private final ConcurrentHashMap<String, AtomicInteger> groupSummaryLogCounter = new ConcurrentHashMap<>();
+
+    // In-memory cursors only rotate bounded scans; database state remains authoritative after restart.
+    private final ConcurrentHashMap<String, HeldCursor> heldScanCursors = new ConcurrentHashMap<>();
+
+    private record HeldCursor(LocalDateTime cutoff, LocalDateTime executeAt, Long id) { }
 
     public DispatchService(SchedulerProperties properties,
                            GroupConfigRepository groupConfigRepository,
@@ -126,6 +133,9 @@ public class DispatchService {
             promoted++;
         }
 
+        List<SchedulerTask> heldCandidates = findHeldCandidates(cfg, dispatchRoute);
+        int heldIndex = 0;
+        Set<Long> attemptedHeld = new HashSet<>();
         long groupRunning = concurrencyGuard.groupRunning(cfg.getGroupCode());
 
         int pageSize = Math.max(1, cfg.getDispatchBatchSize());
@@ -133,14 +143,21 @@ public class DispatchService {
         int skipped = 0;
         boolean workerPoolSaturated = false;
         int scannedUsers = 0;
-        while (scannedUsers < Math.max(1, properties.getReadyScanPageLimit())) {
+        while (heldIndex < heldCandidates.size() || scannedUsers < Math.max(1, properties.getReadyScanPageLimit())) {
             groupRunning = concurrencyGuard.groupRunning(cfg.getGroupCode());
 
-            String userId = queueRedisService.peekNextActiveUser(cfg.getGroupCode(), dispatchRoute);
+            // Held continuations bypass active-user priority, but share the old instances' user lock.
+            SchedulerTask heldCandidate = heldIndex < heldCandidates.size() ? heldCandidates.get(heldIndex++) : null;
+            String userId = heldCandidate != null ? heldCandidate.getUserId()
+                    : queueRedisService.peekNextActiveUser(cfg.getGroupCode(), dispatchRoute);
             if (userId == null || userId.isBlank()) {
                 break;
             }
-            scannedUsers++;
+            if (heldCandidate == null) {
+                scannedUsers++;
+            } else {
+                attemptedHeld.add(heldCandidate.getId());
+            }
             String lockToken = queueRedisService.tryAcquireActiveUserLock(
                     cfg.getGroupCode(), dispatchRoute, userId, properties.getActiveUserLockTtlMs()
             );
@@ -152,26 +169,41 @@ public class DispatchService {
             }
 
             try {
-                Integer headPriority = queueRedisService.peekReadyHeadPriority(cfg.getGroupCode(), dispatchRoute, userId);
-                if (headPriority == null) {
-                    queueRedisService.rebalanceActiveUser(cfg.getGroupCode(), dispatchRoute, userId);
-                    continue;
+                List<Long> ready;
+                Map<Long, SchedulerTask> readyTasks;
+                if (heldCandidate != null) {
+                    // Re-read under the shared lock: an older instance may have already advanced this task.
+                    SchedulerTask current = taskRepository.findById(heldCandidate.getId()).orElse(null);
+                    if (current == null || current.getStatus() != TaskStatus.WAIT_HOLD
+                            || !Objects.equals(current.getGroupCode(), cfg.getGroupCode())
+                            || !sameRoute(current.getDispatchRoute(), dispatchRoute)
+                            || !Objects.equals(current.getUserId(), userId) || !current.due(LocalDateTime.now())) {
+                        continue;
+                    }
+                    ready = List.of(current.getId());
+                    readyTasks = Map.of(current.getId(), current);
+                } else {
+                    Integer headPriority = queueRedisService.peekReadyHeadPriority(cfg.getGroupCode(), dispatchRoute, userId);
+                    if (headPriority == null) {
+                        queueRedisService.rebalanceActiveUser(cfg.getGroupCode(), dispatchRoute, userId);
+                        continue;
+                    }
+                    ready = queueRedisService.peekReadyTasksByPriority(
+                            cfg.getGroupCode(), dispatchRoute, userId, headPriority, pageSize
+                    );
+                    if (ready.isEmpty()) {
+                        queueRedisService.rebalanceActiveUser(cfg.getGroupCode(), dispatchRoute, userId);
+                        continue;
+                    }
+                    readyTasks = taskRepository.findByIds(ready);
                 }
-
-                UserConcurrencyConfig userConfig = userConcurrencyConfigRepository
-                        .findByUserIdAndGroupCode(userId, cfg.getGroupCode())
-                        .orElse(null);
+                UserConcurrencyConfig userConfig = heldCandidate == null ? userConcurrencyConfigRepository
+                        .findByUserIdAndGroupCode(userId, cfg.getGroupCode()).orElse(null) : null;
                 long userRunning = concurrencyGuard.userRunning(cfg.getGroupCode(), userId);
-                List<Long> ready = queueRedisService.peekReadyTasksByPriority(
-                        cfg.getGroupCode(), dispatchRoute, userId, headPriority, pageSize
-                );
-                if (ready.isEmpty()) {
-                    queueRedisService.rebalanceActiveUser(cfg.getGroupCode(), dispatchRoute, userId);
-                    continue;
-                }
-
-                Map<Long, SchedulerTask> readyTasks = taskRepository.findByIds(ready);
                 for (Long taskId : ready) {
+                    if (heldCandidate == null && attemptedHeld.contains(taskId)) {
+                        continue;
+                    }
                     SchedulerTask task = readyTasks.get(taskId);
                     if (task == null) {
                         queueRedisService.removeFromReadyQueue(cfg.getGroupCode(), dispatchRoute, userId, taskId);
@@ -216,14 +248,11 @@ public class DispatchService {
                         continue;
                     }
 
-                    if (task.waitingTimedOut(currentNow)) {
+                    if (!waitHoldTask && task.waitingTimedOut(currentNow)) {
                         boolean failed = taskStateService.markFailedByWaitDeadline(task.getId(), currentNow);
                         queueRedisService.removeFromReadyQueue(task);
                         skipped++;
                         if (failed) {
-                            if (waitHoldTask) {
-                                concurrencyGuard.repairRelease(task.getGroupCode(), task.getUserId());
-                            }
                             log.info("dispatch skipped timed out task before running, taskId={}, taskNo={}, group={}, user={}",
                                     task.getId(), task.getTaskNo(), task.getGroupCode(), task.getUserId());
                         }
@@ -397,6 +426,12 @@ public class DispatchService {
                 if (workerPoolSaturated) {
                     break;
                 }
+            } catch (RuntimeException ex) {
+                if (heldCandidate == null) {
+                    throw ex;
+                }
+                log.error("dispatch held task failed, taskId={}, group={}, user={}",
+                        heldCandidate.getId(), cfg.getGroupCode(), userId, ex);
             } finally {
                 queueRedisService.releaseActiveUserLock(cfg.getGroupCode(), dispatchRoute, userId, lockToken);
             }
@@ -413,6 +448,26 @@ public class DispatchService {
                     cfg.getGroupCode(), promoted, pageSize, dispatched, skipped,
                     groupRunning, System.currentTimeMillis() - begin);
         }
+    }
+
+    private List<SchedulerTask> findHeldCandidates(GroupConfig cfg, String dispatchRoute) {
+        HeldCursor cursor = heldScanCursors.get(cfg.getGroupCode());
+        // Finish a fixed time window before revisiting the head. Requeued tasks belong to a later sweep.
+        LocalDateTime cutoff = cursor == null ? LocalDateTime.now() : cursor.cutoff();
+        int limit = Math.max(1, cfg.getDispatchBatchSize());
+        List<SchedulerTask> tasks = taskRepository.findDueHeldTasks(cfg.getGroupCode(), dispatchRoute, cutoff,
+                cursor == null ? null : cursor.executeAt(), cursor == null ? null : cursor.id(), limit);
+        if (tasks.isEmpty() && cursor != null) {
+            cutoff = LocalDateTime.now();
+            tasks = taskRepository.findDueHeldTasks(cfg.getGroupCode(), dispatchRoute, cutoff, null, null, limit);
+        }
+        if (tasks.isEmpty()) {
+            heldScanCursors.remove(cfg.getGroupCode());
+        } else {
+            SchedulerTask last = tasks.get(tasks.size() - 1);
+            heldScanCursors.put(cfg.getGroupCode(), new HeldCursor(cutoff, last.getExecuteAt(), last.getId()));
+        }
+        return tasks;
     }
 
     private LocalDateTime nextRetryTime(SchedulerTask task) {

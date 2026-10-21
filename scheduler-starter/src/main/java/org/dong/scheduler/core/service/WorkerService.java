@@ -112,6 +112,8 @@ public class WorkerService {
 
     private void executeInternal(SchedulerTask task, GroupConfig groupConfig, String executeNo, boolean rethrowOnException) {
         long begin = System.currentTimeMillis();
+        // Dispatch preserves the source status in the snapshot after the database CAS to RUNNING.
+        boolean heldContinuation = task.getStatus() == TaskStatus.WAIT_HOLD;
         String instanceId = properties.getInstanceId();
         LocalDateTime now = LocalDateTime.now();
         log.info("worker run start, taskId={}, taskNo={}, executeNo={}, bizType={}, retryCount={}/{}",
@@ -161,19 +163,24 @@ public class WorkerService {
                     return;
                 }
                 if (state != BusinessTaskState.NEED_RUNNING && state != BusinessTaskState.RUNNING) {
-                    LocalDateTime nextCheckAt = nextRetryTime(task);
-                    boolean deferred = taskRepository.rescheduleToRunnable(
-                            task.getId(),
-                            nextCheckAt,
-                            "BIZ_STATE_NOT_READY",
-                            "business state is " + state,
-                            LocalDateTime.now()
-                    );
+                    LocalDateTime nextCheckAt = heldContinuation ? nextHoldTime(task) : nextRetryTime(task);
+                    boolean deferred = heldContinuation
+                            ? taskRepository.rollbackToWaitHold(task.getId(), nextCheckAt, LocalDateTime.now())
+                            : taskRepository.rescheduleToRunnable(
+                                    task.getId(),
+                                    nextCheckAt,
+                                    "BIZ_STATE_NOT_READY",
+                                    "business state is " + state,
+                                    LocalDateTime.now()
+                            );
                     if (deferred) {
+                        if (heldContinuation) {
+                            task.setStatus(TaskStatus.WAIT_HOLD);
+                        }
                         task.setExecuteAt(nextCheckAt);
                         queueRedisService.enqueue(task);
                     }
-                    finalStatus = TaskStatus.WAIT_RETRY;
+                    finalStatus = heldContinuation ? TaskStatus.WAIT_HOLD : TaskStatus.WAIT_RETRY;
                     log.info("worker deferred by biz state, taskId={}, taskNo={}, executeNo={}, state={}, nextCheckAt={}",
                             task.getId(), task.getTaskNo(), executeNo, state, nextCheckAt);
                     return;

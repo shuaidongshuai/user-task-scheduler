@@ -404,6 +404,14 @@ python3 scripts/run_group_fallback_http_smoke.py \
 - 任务重新进入 time queue，到期后再被 promote 到 ready queue
 - 调度恢复时只抢本轮 task lease，不重复增加并发计数
 
+每轮调度会先按 group 和当前 dispatch route，从数据库独立扫描一批到期的 `WAIT_HOLD`，
+再按原有优先级调度新任务。持有任务不依赖 Redis ready 队列的用户顺序或首页位置，
+group/user 额度满时仍可继续轮询；新任务仍需取得额度才能启动。
+持有扫描复用 `dispatch_batch_size` 限制单轮数量，通过内存游标逐批扫完固定截止时间内的任务后再从头扫描；
+后续重新挂起或新到期的任务纳入下一轮完整扫描，避免它们持续推动游标而延迟重访被跳过的任务。重启后从头扫描。
+新旧实例沿用相同的用户锁和任务 lease，取得用户锁后重读状态及到期时间；原有 time/ready 入队逻辑保留，
+历史任务无需迁移，也无需清理 Redis。开始执行前的等待期限不阻断已启动的 `WAIT_HOLD` 续轮。
+
 任务级参数：
 
 - `holdMaxRounds`：最多允许多少轮 `WAIT_HOLD`
